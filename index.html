@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loot Goblin</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d0b14; overflow: hidden; }
+    #game { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="game"></div>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script>
+    // Load the game scripts in order. The ?v= cache-buster makes a normal refresh always pick up
+    // edited files (simple static servers send no cache headers, so browsers keep stale copies).
+    const GAME_SCRIPTS = [
+      'config', 'progress', 'sprites', 'sfx', 'music', 'enemies', 'powerups', 'hazards', 'bounties',
+      'scenes/Boot', 'scenes/Menu', 'scenes/Trophies', 'scenes/Game', 'scenes/GameOver', 'main',
+    ];
+    const version = Date.now();
+    (function load(i) {
+      if (i >= GAME_SCRIPTS.length) return;
+      const s = document.createElement('script');
+      s.src = `src/${GAME_SCRIPTS[i]}.js?v=${version}`;
+      s.onload = () => load(i + 1);
+      document.body.appendChild(s);
+    })(0);
+  </script>
+</body>
+</html>

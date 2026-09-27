@@ -47,6 +47,10 @@ class GameScene extends Phaser.Scene {
     this.anims.resumeAll();
 
     this.transitioning = false; // true while the screen is faded out for an arena change
+    this.frozen = false;        // true during a hit-stop freeze-frame
+    this.displayBanked = 0;     // the HUD score counts up toward stats.banked
+    this.bestAtStart = Store.getBest(this.coop);
+    this.pbShown = false;
     this.arenaGen = 0;          // bumps on every arena change so stale delayed effects can bail
     this.floor = null;
     this.walls = null;
@@ -776,12 +780,72 @@ class GameScene extends Phaser.Scene {
     if (haul > 1) parts.push(`HAUL x${haul}`);
     if (combo > 1) parts.push(`COMBO x${combo.toFixed(2)}`);
     if (streak > 1) parts.push(`STREAK x${streak.toFixed(1)}`);
-    Sfx.play(bonus ? 'bigbank' : 'bank');
-    this.floatText(this.stash.x + 30, this.stash.y - 24, `+${pts}`, '#fbf236', 26);
+
+    // Celebrate in proportion to the haul. Every bank showers coins into the stash; big hauls add
+    // a freeze-frame, and huge ones a gold flash and camera punch.
+    const tier = c >= 20 ? 'huge' : c >= 10 ? 'big' : 'normal';
+    this.coinShower(g, c);
+    Sfx.play(tier === 'huge' ? 'huge' : bonus ? 'bigbank' : 'bank');
+    this.floatText(this.stash.x + 30, this.stash.y - 24, `+${pts}`, '#fbf236', { normal: 26, big: 32, huge: 40 }[tier], 1200);
     if (bonus) this.floatText(this.stash.x + 130, this.stash.y - 56, parts.join(' · '), '#ff9f43', 15, 1600);
-    this.sparks.explode(bonus ? 40 : 16, this.stash.x, this.stash.y);
-    this.tweens.add({ targets: this.stash, scale: 1.3, duration: 90, yoyo: true });
-    this.tweens.add({ targets: this.bankedText, scale: 1.3, duration: 90, yoyo: true });
+    this.sparks.explode({ normal: bonus ? 30 : 16, big: 45, huge: 70 }[tier], this.stash.x, this.stash.y);
+    this.tweens.add({ targets: this.stash, scale: { normal: 1.3, big: 1.45, huge: 1.6 }[tier], duration: 90, yoyo: true });
+    if (tier === 'big') {
+      this.hitStop(90);
+      this.cameras.main.shake(120, 0.004);
+    } else if (tier === 'huge') {
+      this.hitStop(160);
+      this.cameras.main.flash(200, 255, 220, 90);
+      this.tweens.add({ targets: this.cameras.main, zoom: 1.05, duration: 90, yoyo: true, ease: 'Quad.easeOut' });
+      this.floatText(this.stash.x + 110, this.stash.y - 90, 'HUGE HAUL!', '#fbf236', 30, 1400);
+    }
+  }
+
+  // Coins arc from the goblin into the stash one after another, each landing with a rising tick.
+  coinShower(g, count) {
+    const n = Math.min(count, 24);
+    const sx = g.x, sy = g.y - 8;
+    for (let i = 0; i < n; i++) {
+      const coin = this.add.sprite(sx, sy, 'coin_0').play('coin_spin').setDepth(960);
+      const tx = this.stash.x + Phaser.Math.Between(-10, 10), ty = this.stash.y + Phaser.Math.Between(-6, 6);
+      const lift = Phaser.Math.Between(40, 80);
+      this.tweens.addCounter({
+        from: 0, to: 1, duration: 380, delay: i * 35, ease: 'Quad.easeIn',
+        onUpdate: (tw) => {
+          const v = tw.getValue();
+          coin.setPosition(sx + (tx - sx) * v, sy + (ty - sy) * v - Math.sin(v * Math.PI) * lift);
+        },
+        onComplete: () => {
+          coin.destroy();
+          Sfx.play('tick', i);
+          if (i % 4 === 0) this.tweens.add({ targets: this.stash, scale: 1.12, duration: 50, yoyo: true });
+        },
+      });
+    }
+  }
+
+  // Brief freeze-frame that sells impact. Visual tweens keep playing; gameplay pauses.
+  hitStop(ms) {
+    if (this.frozen) return;
+    this.frozen = true;
+    this.physics.world.pause();
+    this.time.delayedCall(ms, () => {
+      this.frozen = false;
+      if (!this.paused && !this.transitioning && !this.over) this.physics.world.resume();
+    });
+  }
+
+  // First time this run's score passes the best from before the run.
+  celebratePersonalBest() {
+    this.pbShown = true;
+    Sfx.play('pb');
+    // Upper arena, clear of the HUD, toasts (top right) and the stash popups (bottom left).
+    const y = HUD_H + 160;
+    const t = this.add.text(W / 2, y, 'NEW PERSONAL BEST!', textStyle(30, '#fbf236')).setOrigin(0.5).setDepth(1500).setScale(0.3);
+    this.tweens.add({ targets: t, scale: 1, duration: 300, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: t, alpha: 0, y: y - 20, delay: 1800, duration: 500, onComplete: () => t.destroy() });
+    this.sparks.explode(40, W / 2, y);
+    this.bankedText.setColor('#fbf236'); // stays gold for the rest of the run
   }
 
   // ---------------------------------------------------------------- adventurers
@@ -1373,7 +1437,11 @@ class GameScene extends Phaser.Scene {
     this.bossUi.forEach((o) => o.setVisible(bossOn));
     if (bossOn) this.bossBar.setScale(Phaser.Math.Clamp((this.bossEnd - this.clock) / BOSS_DURATION, 0, 1), 1);
 
-    this.bankedText.setText(`BANKED ${s.banked}`);
+    // Count the score up instead of jumping, so banking feels like money pouring in.
+    const gap = s.banked - this.displayBanked;
+    this.displayBanked = gap < 1 ? s.banked : this.displayBanked + Math.max(1, gap * 0.12);
+    this.bankedText.setText(`BANKED ${Math.floor(this.displayBanked)}`);
+    if (!this.pbShown && this.bestAtStart > 0 && s.banked > this.bestAtStart) this.celebratePersonalBest();
     if (s.banked >= 500) this.achieve('score_500');
     if (s.banked >= 2000) this.achieve('score_2000');
     this.waveText.setText(`WAVE ${s.wave}`);
@@ -1723,6 +1791,11 @@ class GameScene extends Phaser.Scene {
       this.rollRequests.clear();
       this.abilityRequests.clear();
       this.rerollRequested = false;
+      return;
+    }
+    // Hit-stop: gameplay holds for a moment (inputs stay queued); the score keeps counting up.
+    if (this.frozen) {
+      this.updateHud();
       return;
     }
     if (this.debug) this.handleDebugKeys();

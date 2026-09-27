@@ -3,14 +3,15 @@
 // used with E / Y), 'perk' (one-off run bonuses). desc(level) describes the effect at that level.
 
 const ABILITY_STATS = {
-  shiv: { cooldown: [12000, 9000, 6000] },
+  shiv: { cooldown: [90000, 75000, 60000] }, // instant kills are strong: 1.5 / 1.25 / 1 minute
   caltrops: { cooldown: [10000, 8000, 6000], duration: [5000, 6000, 7000] },
   coinmagnet: { cooldown: [9000, 7000, 5000], radius: [150, 200, 260] },
   smokepouch: { cooldown: [16000, 11000] },
   decoy: { cooldown: [12000, 8000], duration: [3000, 5000] },
 };
 
-const secs = (ms) => `${ms / 1000}s`;
+// Short durations as seconds ("12s"), a minute or more as minutes ("1.25 min").
+const secs = (ms) => (ms >= 60000 ? `${ms / 60000} min` : `${ms / 1000}s`);
 
 const UPGRADES = {
   speed: { kind: 'attr', name: 'Nimble Feet', costs: [60, 120, 220, 380, 600], desc: (l) => `+${5 * l}% run speed` },
@@ -25,7 +26,7 @@ const UPGRADES = {
 
   shiv: {
     kind: 'ability', name: 'Shiv', costs: [300, 500, 900],
-    desc: (l) => `kill a hero, ${secs(ABILITY_STATS.shiv.cooldown[l - 1])} cd${l >= 3 ? ', stuns Paladin' : ''}`,
+    desc: (l) => `kill a hero (not bosses), ${secs(ABILITY_STATS.shiv.cooldown[l - 1])} cd${l >= 3 ? ', stuns bosses' : ''}`,
   },
   caltrops: {
     kind: 'ability', name: 'Caltrops', costs: [200, 350, 600],

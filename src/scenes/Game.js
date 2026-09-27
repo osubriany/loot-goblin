@@ -1170,8 +1170,8 @@ class GameScene extends Phaser.Scene {
     h.tripText = this.add.text(150, comboY, '', textStyle(12, '#fbf236')).setOrigin(0, 0.5).setDepth(D + 1);
     // Equipped ability: key + name with a recharge bar, on the same wall row as the combo.
     if (this.ability) {
-      const name = UPGRADES[this.ability].name.toUpperCase();
-      h.abilityText = this.add.text(560, comboY, `${g.controls.abilityKey}: ${name}`, textStyle(12, g.color)).setOrigin(0, 0.5).setDepth(D + 1);
+      h.abilityLabel = `${g.controls.abilityKey}: ${UPGRADES[this.ability].name.toUpperCase()}`;
+      h.abilityText = this.add.text(560, comboY, h.abilityLabel, textStyle(12, g.color)).setOrigin(0, 0.5).setDepth(D + 1);
       this.add.rectangle(560, comboY + 11, 90, 3, 0x2a2438).setOrigin(0, 0.5).setDepth(D + 1);
       h.abilityBar = this.add.rectangle(560, comboY + 11, 90, 3, 0xfbf236).setOrigin(0, 0.5).setDepth(D + 2);
     }
@@ -1189,6 +1189,8 @@ class GameScene extends Phaser.Scene {
     if (h.abilityText) {
       const left = g.abilityReadyAt - this.clock;
       const ready = left <= 0 && !g.down;
+      // Show a seconds countdown for long cooldowns (e.g. "E: SHIV 42s").
+      h.abilityText.setText(left > 1500 ? `${h.abilityLabel} ${Math.ceil(left / 1000)}s` : h.abilityLabel);
       h.abilityText.setAlpha(ready ? 1 : 0.6);
       h.abilityBar.setScale(ready ? 1 : Phaser.Math.Clamp(1 - left / g.abilityCd, 0, 1), 1);
       h.abilityBar.fillColor = ready ? 0x6abe30 : 0xfbf236;
@@ -1285,7 +1287,8 @@ class GameScene extends Phaser.Scene {
     return g.flipX ? -1 : 1;
   }
 
-  // Stab the nearest hero in front: it's taken out for good. The Paladin only gets stunned (level 3).
+  // Stab the nearest hero in front: it's taken out for good. Bosses can never be killed; at level 3
+  // the stab stuns them instead. Only a real kill (or boss stun) spends the long cooldown.
   useShiv(g, lvl) {
     const pc = g.body.center, dir = this.facing(g);
     const slash = this.add.graphics().setDepth(900);
@@ -1294,28 +1297,36 @@ class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: slash, alpha: 0, duration: 180, onComplete: () => slash.destroy() });
     Sfx.play('shiv');
 
+    // Nearest hero in reach, preferring ones that can actually be killed over bosses.
+    const isBoss = (e) => !!ENEMY_TYPES[e.kind].boss;
     let target = null, best = Infinity;
     for (const e of this.enemies.getChildren()) {
       if (e.gone || e.spawning) continue;
       const ec = e.body.center;
       const d = Phaser.Math.Distance.Between(pc.x, pc.y, ec.x, ec.y);
-      const reach = e.kind === 'paladin' ? 56 : 44;
+      const reach = isBoss(e) ? 56 : 44;
       // Anything touching counts; further out it has to be on the side we face.
       if (d > reach || (d > 20 && Math.sign(ec.x - pc.x) !== dir)) continue;
-      if (d < best) { best = d; target = e; }
+      const score = d + (isBoss(e) ? 1000 : 0);
+      if (score < best) { best = score; target = e; }
     }
-    const cd = ABILITY_STATS.shiv.cooldown[lvl - 1];
-    if (!target) return 1000; // whiffed: short cooldown
-    if (target.kind === 'paladin') {
-      if (lvl >= 3) this.stunEnemy(target, 1500);
-      else this.floatText(target.x, target.y - 40, 'TOO TOUGH!', '#9badb7', 14);
-      return cd;
+    const MISS_CD = 1000;
+    if (!target) return MISS_CD;
+    if (isBoss(target)) {
+      if (lvl < 3) {
+        this.floatText(target.x, target.y - 40, 'TOO TOUGH!', '#9badb7', 14);
+        return MISS_CD;
+      }
+      this.stunEnemy(target, 1500);
+      return ABILITY_STATS.shiv.cooldown[lvl - 1];
     }
     this.killEnemy(target);
-    return cd;
+    return ABILITY_STATS.shiv.cooldown[lvl - 1];
   }
 
+  // Remove a hero for good (Shiv). Bosses are never killable.
   killEnemy(e) {
+    if (ENEMY_TYPES[e.kind].boss) return;
     e.gone = true;
     e.setVelocity(0, 0);
     e.body.enable = false;

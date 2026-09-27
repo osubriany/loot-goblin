@@ -102,6 +102,8 @@ const Sfx = {
       case 'decoy': seq([988, 1319, 988, 1319], 0.08, 0.08, 'triangle', 0.05); break;
       case 'buy': seq([523, 784, 1047], 0.06, 0.1, 'square', 0.07); break;
       case 'nope': this.tone(180, 0.15, 'square', 0.06, 0, 120); break;
+      case 'sizzle': this.noise(0.25, 0.06); this.tone(90, 0.25, 'sawtooth', 0.04, 0, 60); break;
+      case 'arena': seq([262, 330, 392, 523, 392, 523, 659], 0.08, 0.18, 'triangle', 0.09); break;
       case 'gameover': seq([392, 330, 262, 196], 0.22, 0.3, 'square', 0.08); break;
     }
   },

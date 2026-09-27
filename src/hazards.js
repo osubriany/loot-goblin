@@ -1,25 +1,20 @@
-// Arena hazards: cycling spike tiles, rolling barrels and the Trapper's bear traps.
-// Spikes and barrels hurt the goblin and stun heroes, so heroes can be lured into them.
+// Arena hazards: cycling spike/lava tiles, rolling barrels and the Trapper's bear traps.
+// Spikes, lava and barrels hurt the goblin and stun heroes, so heroes can be lured into them.
 // All timing uses scene.clock, so everything freezes while paused.
 
 const FRIENDLY_TINT = 0x9be08a;
 
+// Per-look trap settings. Lava erupts a little longer than spikes. Textures are per arena
+// (spikes_<arena>_off etc., built in sprites.js) so traps match the arena's floor colors.
+const TRAP_LOOKS = {
+  spikes: { warnTint: 0xff7070, sound: 'spikes', cycle: SPIKE_CYCLE },
+  lava: { warnTint: 0xffd070, sound: 'sizzle', cycle: { off: 2500, warn: 600, on: 2200 } },
+};
+
 const Hazards = {
   init(scene) {
-    const makeGroup = (tiles, delay, friendly = false) => ({
-      delay,
-      friendly, // friendly spikes (Stash Spikes perk) only hurt heroes and glow green
-      state: 'off',
-      tiles: tiles.map(([c, r]) => {
-        const { x, y } = tileCenter(c, r);
-        const img = scene.add.image(x, y, 'spikes_off').setDepth(1);
-        if (friendly) img.setTint(FRIENDLY_TINT);
-        return { c, r, x, y, img };
-      }),
-    });
-    // Staggered so the groups don't fire together.
-    scene.spikeGroups = SPIKE_GROUPS.map((tiles, i) => makeGroup(tiles, 1500 + i * 1125));
-    if (scene.upg.stashspikes) scene.spikeGroups.push(makeGroup(STASH_SPIKES, 800, true));
+    scene.spikeGroups = [];
+    this.buildTraps(scene);
 
     scene.traps = [];
     scene.barrels = scene.physics.add.group();
@@ -33,6 +28,11 @@ const Hazards = {
       scene.stunEnemy(e, 1500, 'hazard');
     });
     scene.time.addEvent({ delay: BARREL.every, loop: true, callback: () => Hazards.trySpawnBarrel(scene) });
+    // Frequent-barrel arenas get a second roll halfway between the regular ones.
+    scene.time.addEvent({
+      delay: BARREL.every, startAt: BARREL.every / 2, loop: true,
+      callback: () => { if (scene.arena.barrels === 'frequent') Hazards.trySpawnBarrel(scene); },
+    });
 
     scene.chips = scene.add.particles(0, 0, 'chip', {
       speed: { min: 80, max: 220 },
@@ -44,6 +44,43 @@ const Hazards = {
     }).setDepth(900);
   },
 
+  // (Re)create the arena's trap tiles, plus the Stash Spikes perk ring. Called on arena changes too.
+  buildTraps(scene) {
+    for (const grp of scene.spikeGroups) grp.tiles.forEach((t) => t.img.destroy());
+    const arena = scene.arena;
+    const makeGroup = (tiles, delay, look, friendly = false) => {
+      const tint = friendly ? FRIENDLY_TINT : 0xffffff;
+      const tex = { off: `${look}_${arena.id}_off`, on: `${look}_${arena.id}_on` };
+      return {
+        delay: scene.clock + delay,
+        look: TRAP_LOOKS[look],
+        tex,
+        tint,
+        friendly, // friendly spikes (Stash Spikes perk) only hurt heroes and glow green
+        state: 'off',
+        tiles: tiles.map(([c, r]) => {
+          const { x, y } = tileCenter(c, r);
+          const img = scene.add.image(x, y, tex.off).setDepth(1).setTint(tint);
+          return { c, r, x, y, img };
+        }),
+      };
+    };
+    // Staggered so the groups don't fire together.
+    scene.spikeGroups = arena.traps.map((tiles, i) => makeGroup(tiles, 1500 + i * 1125, arena.hazard));
+    if (scene.upg.stashspikes) scene.spikeGroups.push(makeGroup(STASH_SPIKES, 800, 'spikes', true));
+  },
+
+  // Remove barrels and bear traps (used when the arena changes).
+  clearArena(scene) {
+    scene.barrels.clear(true, true);
+    for (const t of scene.traps) {
+      t.owner.trapCount = 0;
+      scene.tweens.killTweensOf(t.img);
+      t.img.destroy();
+    }
+    scene.traps = [];
+  },
+
   update(scene) {
     this.updateSpikes(scene);
     this.updateTraps(scene);
@@ -53,30 +90,31 @@ const Hazards = {
     }
   },
 
-  // ---------------------------------------------------------------- spikes
+  // ---------------------------------------------------------------- spikes & lava
 
   spikeState(scene, group) {
     const t = scene.clock - group.delay;
     if (t < 0) return 'off';
-    const p = t % (SPIKE_CYCLE.off + SPIKE_CYCLE.warn + SPIKE_CYCLE.on);
-    if (p < SPIKE_CYCLE.off) return 'off';
-    return p < SPIKE_CYCLE.off + SPIKE_CYCLE.warn ? 'warn' : 'on';
+    const c = group.look.cycle;
+    const p = t % (c.off + c.warn + c.on);
+    if (p < c.off) return 'off';
+    return p < c.off + c.warn ? 'warn' : 'on';
   },
 
   updateSpikes(scene) {
     const alive = scene.goblins.filter((g) => !g.down);
     for (const grp of scene.spikeGroups) {
       const state = this.spikeState(scene, grp);
-      const baseTint = (img) => (grp.friendly ? img.setTint(FRIENDLY_TINT) : img.clearTint());
       if (state !== grp.state) {
         grp.state = state;
-        grp.tiles.forEach((t) => baseTint(t.img.setTexture(state === 'on' ? 'spikes_on' : 'spikes_off')));
+        grp.tiles.forEach((t) => t.img.setTexture(state === 'on' ? grp.tex.on : grp.tex.off).setTint(grp.tint));
         const near = alive.some((g) => Phaser.Math.Distance.Between(g.x, g.y, grp.tiles[0].x, grp.tiles[0].y) < 220);
-        if (state === 'on' && near) Sfx.play('spikes');
+        if (state === 'on' && near) Sfx.play(grp.look.sound);
       }
       if (state === 'warn') {
         const flash = Math.floor(scene.clock / 100) % 2 === 0;
-        grp.tiles.forEach((t) => (flash ? t.img.setTint(grp.friendly ? 0x6abe30 : 0xff7070) : baseTint(t.img)));
+        const warnTint = grp.friendly ? 0x6abe30 : grp.look.warnTint;
+        grp.tiles.forEach((t) => t.img.setTint(flash ? warnTint : grp.tint));
       }
       if (state !== 'on') continue;
 
@@ -98,11 +136,14 @@ const Hazards = {
 
   // ---------------------------------------------------------------- barrels
 
+  // Normal arenas: from BARREL.firstWave, sometimes. 'frequent' arenas (the Library): always.
   trySpawnBarrel(scene, force = false) {
-    if (scene.over) return;
-    if (!force && (scene.stats.wave < BARREL.firstWave || Math.random() > BARREL.chance)) return;
+    if (scene.over || scene.transitioning) return;
+    const frequent = scene.arena.barrels === 'frequent';
+    if (!force && !frequent && (scene.stats.wave < BARREL.firstWave || Math.random() > BARREL.chance)) return;
     const lane = this.pickLane(scene);
     if (!lane) return;
+    const arenaGen = scene.arenaGen;
 
     // Telegraph the lane before the barrel shows up.
     const g = scene.add.graphics().setDepth(2);
@@ -117,7 +158,7 @@ const Hazards = {
     scene.time.delayedCall(BARREL.telegraph, () => {
       scene.tweens.killTweensOf(g);
       g.destroy();
-      if (scene.over) return;
+      if (scene.over || scene.arenaGen !== arenaGen) return; // arena changed: that lane is gone
       const { x, y } = tileCenter(...lane.tiles[0]);
       const b = scene.barrels.create(x, y, 'barrel').setDepth(y);
       b.body.setCircle(11, 5, 5);

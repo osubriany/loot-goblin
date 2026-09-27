@@ -401,6 +401,15 @@ const DOOR = [
   'mBBBBBBBBBBBBBBm',
 ];
 
+// Library bookshelf: wooden frame with two rows of colorful book spines.
+const SHELF = (() => {
+  const plank = 'BBBBBBBBBBBBBBBB';
+  const booksA = 'BrrIIhhyyvvrrIIB';
+  const booksB = 'BIIhhyyvvrrIIhhB';
+  return [plank, booksA, booksA, booksA, booksA, booksA, booksA, plank,
+    booksB, booksB, booksB, booksB, booksB, booksB, plank, 'kkkkkkkkkkkkkkkk'];
+})();
+
 const FLOOR = (() => {
   const rows = [];
   for (let r = 0; r < 16; r++) {
@@ -427,6 +436,21 @@ function spikeTile(on) {
   return rows;
 }
 
+// Lava cracks: dim red seams when cool, glowing orange/yellow when erupting.
+function lavaTile(on) {
+  const rows = FLOOR.map((row) => row.replace(/F/g, 'f'));
+  const set = (c, r, ch) => { rows[r] = rows[r].slice(0, c) + ch + rows[r].slice(c + 1); };
+  const hot = on ? 'Y' : 'r';
+  for (let c = 0; c < 15; c++) {
+    const r = 7 + Math.round(2 * Math.sin(c / 2.2));
+    set(c, r, hot);
+    set(c, r + 1, on && c % 3 ? 'y' : hot);
+  }
+  for (let r = 2; r < 7; r++) set(4 + (r % 2), r, hot);    // branch up
+  for (let r = 10; r < 14; r++) set(11 - (r % 2), r, hot); // branch down
+  return rows;
+}
+
 // Second walk frame: spread the legs by shifting the bottom three rows outward.
 function walkFrame(rows) {
   return rows.map((row, i) => {
@@ -449,7 +473,7 @@ const SPRITES = {
   trapper_0: [TRAPPER, 2], trapper_1: [walkFrame(TRAPPER), 2],
   chest: [CHEST_SPRITE, 2], barrel: [BARREL_SPRITE, 2],
   beartrap_open: [BEARTRAP_OPEN, 2], beartrap_shut: [BEARTRAP_SHUT, 2],
-  spikes_off: [spikeTile(false), 2], spikes_on: [spikeTile(true), 2],
+  shelf: [SHELF, 2],
   chip: [['bB', 'Bb'], 2],
   potion: [POTION, 2], boots: [BOOTS, 2], smoke: [SMOKE, 2],
   coin_0: [COIN_A, 2], coin_1: [COIN_B, 2],
@@ -457,7 +481,7 @@ const SPRITES = {
   heart: [HEART, 3], heart_empty: [HEART_EMPTY, 3],
   arrow: [ARROW, 2],
   stash: [STASH, 3],
-  wall: [WALL, 2], door: [DOOR, 2], floor: [FLOOR, 2],
+  wall: [WALL, 2], door: [DOOR, 2], floor: [FLOOR, 2], // menus use the default floor
   spark: [['yy', 'yy'], 2],
 };
 
@@ -467,13 +491,28 @@ for (const s of SKINS) {
   SPRITES[`gob_${s.id}_1`] = [walkFrame(rows), 2];
 }
 
+function generateTexture(scene, key, rows, px, palette) {
+  const width = Math.max(...rows.map((r) => r.length));
+  const data = rows.map((r) => r.padEnd(width, '.'));
+  for (const ch of new Set(data.join(''))) {
+    if (ch !== '.' && !palette[ch]) console.warn(`Sprite ${key}: unknown palette char "${ch}"`);
+  }
+  scene.textures.generate(key, { data, pixelWidth: px, palette });
+}
+
 function buildTextures(scene) {
-  for (const [key, [rows, px]] of Object.entries(SPRITES)) {
-    const width = Math.max(...rows.map((r) => r.length));
-    const data = rows.map((r) => r.padEnd(width, '.'));
-    for (const ch of new Set(data.join(''))) {
-      if (ch !== '.' && !PALETTE[ch]) console.warn(`Sprite ${key}: unknown palette char "${ch}"`);
+  for (const [key, [rows, px]] of Object.entries(SPRITES)) generateTexture(scene, key, rows, px, PALETTE);
+
+  // Each arena gets its own recolored floor, walls and trap tiles (see `colors` in arenas.js):
+  // floor_<id>, wall_<id>, spikes_<id>_off/on, lava_<id>_off/on.
+  for (const arena of ARENAS) {
+    const palette = { ...PALETTE, ...arena.colors };
+    generateTexture(scene, `floor_${arena.id}`, FLOOR, 2, palette);
+    generateTexture(scene, `wall_${arena.id}`, WALL, 2, palette);
+    for (const on of [false, true]) {
+      const state = on ? 'on' : 'off';
+      generateTexture(scene, `spikes_${arena.id}_${state}`, spikeTile(on), 2, palette);
+      generateTexture(scene, `lava_${arena.id}_${state}`, lavaTile(on), 2, palette);
     }
-    scene.textures.generate(key, { data, pixelWidth: px, palette: PALETTE });
   }
 }

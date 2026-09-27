@@ -46,7 +46,12 @@ class GameScene extends Phaser.Scene {
     this.debug = new URLSearchParams(window.location.search).has('debug');
     this.anims.resumeAll();
 
-    this.buildArena();
+    this.transitioning = false; // true while the screen is faded out for an arena change
+    this.arenaGen = 0;          // bumps on every arena change so stale delayed effects can bail
+    this.floor = null;
+    this.walls = null;
+    this.buildArena(arenaForWave(1));
+    this.createStash();
     this.createGoblins();
 
     this.coins = this.physics.add.group();
@@ -77,7 +82,7 @@ class GameScene extends Phaser.Scene {
     }).setDepth(900);
 
     this.createHud();
-    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,P,ESC,M,N,G,' + Object.keys(DEBUG_SPAWNS).join(','));
+    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,P,ESC,M,N,G,V,' + Object.keys(DEBUG_SPAWNS).join(','));
     // Rolls and abilities come from raw key events so left/right keys can belong to different players.
     const onKey = (ev) => {
       if (ev.repeat) return;
@@ -122,39 +127,148 @@ class GameScene extends Phaser.Scene {
     this.computeFlowField();
     this.banner('WAVE 1', 'Grab gold, bank it at your STASH');
     Bounties.start(this);
-    if (this.debug) this.floatText(W / 2, H - FOOT_H - 40, 'DEBUG: 1-7/T heroes, 8-0 power-ups, C chest, B barrel, G +10 gold', '#9badb7', 14, 4000);
+    if (this.debug) this.floatText(W / 2, H - FOOT_H - 40, 'DEBUG: 1-7/T heroes, 8-0 power-ups, C chest, B barrel, G +10 gold, V next arena', '#9badb7', 14, 4000);
   }
 
   // ---------------------------------------------------------------- arena
 
-  buildArena() {
+  // Lay out an arena: grid, floor tint, wall/door sprites and door paths. Reuses the same floor
+  // sprite and wall group on later calls, so colliders registered against this.walls stay valid.
+  buildArena(arena) {
+    this.arena = arena;
     this.grid = [];
     for (let r = 0; r < ROWS; r++) {
       const row = [];
       for (let c = 0; c < COLS; c++) row.push(r === 0 || c === 0 || r === ROWS - 1 || c === COLS - 1 ? 1 : 0);
       this.grid.push(row);
     }
-    PILLARS.forEach(([c, r]) => { this.grid[r][c] = 1; });
+    arena.pillars.forEach(([c, r]) => { this.grid[r][c] = 1; });
 
-    this.add.tileSprite(0, HUD_H, W, ARENA_H, 'floor').setOrigin(0);
+    const floorKey = `floor_${arena.id}`;
+    if (!this.floor) this.floor = this.add.tileSprite(0, HUD_H, W, ARENA_H, floorKey).setOrigin(0);
+    else this.floor.setTexture(floorKey);
 
-    this.walls = this.physics.add.staticGroup();
+    if (this.walls) this.walls.clear(true, true);
+    else this.walls = this.physics.add.staticGroup();
     this.doors = [];
+    const wallKey = `wall_${arena.id}`;
+    const pillarKey = arena.pillarTexture || wallKey;
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         if (!this.grid[r][c]) continue;
-        const door = DOORS.find((d) => d.tile[0] === c && d.tile[1] === r);
+        const door = arena.doors.find((d) => d.tile[0] === c && d.tile[1] === r);
+        const border = r === 0 || c === 0 || r === ROWS - 1 || c === COLS - 1;
         const { x, y } = tileCenter(c, r);
-        const sprite = this.walls.create(x, y, door ? 'door' : 'wall').setDepth(1);
+        const sprite = this.walls.create(x, y, door ? 'door' : border ? wallKey : pillarKey).setDepth(1);
         if (door) this.doors.push({ ...door, sprite });
       }
     }
-    // The map never changes, so paths to each door can be computed once.
+    // The layout is fixed until the next arena change, so door paths are computed once here.
     this.doorFlows = this.doors.map((d) => this.bfs(...d.inner));
+    this.validateArena(arena);
+  }
 
+  // Developer check: the shared corner must be clear and every floor tile reachable from the stash.
+  validateArena(arena) {
+    const mustBeFree = [STASH_TILE, ...PLAYER_STARTS, ...STASH_SPIKES, ...arena.doors.map((d) => d.inner), ...arena.traps.flat()];
+    const blocked = mustBeFree.filter(([c, r]) => !this.isFree(c, r));
+    if (blocked.length) console.warn(`Arena ${arena.id}: required tiles are solid`, blocked);
+    const flow = this.bfs(...STASH_TILE);
+    let unreachable = 0;
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) if (this.isFree(c, r) && flow[r * COLS + c] === INF) unreachable++;
+    }
+    if (unreachable) console.warn(`Arena ${arena.id}: ${unreachable} floor tiles can't be reached`);
+  }
+
+  createStash() {
     const s = tileCenter(...STASH_TILE);
     this.stash = this.add.image(s.x, s.y, 'stash').setDepth(2);
     this.add.text(s.x, s.y - 34, 'STASH', textStyle(12, '#fbf236')).setOrigin(0.5).setDepth(3);
+  }
+
+  // Fade out, swap in the next arena, put everyone somewhere legal, fade back in, then continue.
+  changeArena(arena, then) {
+    this.transitioning = true;
+    this.physics.world.pause();
+    const cam = this.cameras.main;
+    cam.fadeOut(350, 0, 0, 0);
+    cam.once('camerafadeoutcomplete', () => {
+      this.arenaGen++;
+      this.clearArenaObjects();
+      this.buildArena(arena);
+      Hazards.buildTraps(this);
+      this.relocateActors();
+      this.computeFlowField();
+      for (let i = 0; i < 4; i++) this.spawnRandomCoin();
+      cam.fadeIn(350, 0, 0, 0);
+      this.banner(arena.name.toUpperCase(), arena.subtitle);
+      Sfx.play('arena');
+      cam.once('camerafadeincomplete', () => {
+        this.transitioning = false;
+        this.physics.world.resume();
+        for (const g of this.goblins) if (!g.down) g.invulnUntil = Math.max(g.invulnUntil, this.clock + 1500);
+        then();
+      });
+    });
+  }
+
+  // Things tied to the old layout: floor loot, traps, patches, projectiles, the chest and decoy.
+  clearArenaObjects() {
+    this.tweens.killTweensOf([...this.coins.getChildren(), ...this.powerups.getChildren()]);
+    this.coins.clear(true, true);
+    this.arrows.clear(true, true);
+    this.powerups.clear(true, true);
+    Hazards.clearArena(this);
+    this.iceZones.forEach((z) => z.g.destroy());
+    this.iceZones = [];
+    this.caltrops.forEach((p) => p.gfx.destroy());
+    this.caltrops = [];
+    if (this.chest) this.removeChest();
+    if (this.decoy) this.endDecoy();
+  }
+
+  // Anyone now standing inside a wall moves to the nearest open tile; heroes forget old paths.
+  relocateActors() {
+    const move = (sprite, bodyOffsetY) => {
+      const bc = sprite.body.center;
+      const t = worldToTile(bc.x, bc.y);
+      if (this.isFree(t.c, t.r)) return;
+      const spot = this.nearestFreeTile(t.c, t.r);
+      const { x, y } = tileCenter(spot.c, spot.r);
+      sprite.body.reset(x, y - bodyOffsetY);
+    };
+    for (const g of this.goblins) {
+      if (g.down) {
+        // Downed goblins have no active body; move the sprite itself.
+        const t = worldToTile(g.x, g.y + 8);
+        if (!this.isFree(t.c, t.r)) {
+          const s = this.nearestFreeTile(t.c, t.r);
+          const p = tileCenter(s.c, s.r);
+          g.setPosition(p.x, p.y - 8);
+        }
+      } else {
+        move(g, 8);
+      }
+    }
+    for (const e of this.enemies.getChildren()) {
+      if (e.gone) continue;
+      move(e, 7 * (e.width / 32)); // hero bodies sit ~7px (scaled) below the sprite center
+      this.clearLine(e);
+      Object.assign(e, { coinTarget: null, chestTarget: null, flow: null, wanderTo: null, leaveDoor: undefined, windTint: null });
+      if (['aim', 'cast', 'windup', 'dash', 'telegraph', 'charge'].includes(e.mode)) e.mode = 'move';
+    }
+  }
+
+  nearestFreeTile(c, r) {
+    for (let radius = 1; radius < Math.max(COLS, ROWS); radius++) {
+      for (let dr = -radius; dr <= radius; dr++) {
+        for (let dc = -radius; dc <= radius; dc++) {
+          if (Math.max(Math.abs(dc), Math.abs(dr)) === radius && this.isFree(c + dc, r + dr)) return { c: c + dc, r: r + dr };
+        }
+      }
+    }
+    return { c: STASH_TILE[0], r: STASH_TILE[1] };
   }
 
   isFree(c, r) {
@@ -735,7 +849,8 @@ class GameScene extends Phaser.Scene {
 
   flashDoor(door) {
     door.sprite.setTintFill(0xfbf236);
-    this.time.delayedCall(300, () => door.sprite.clearTint());
+    const gen = this.arenaGen;
+    this.time.delayedCall(300, () => { if (gen === this.arenaGen) door.sprite.clearTint(); });
   }
 
   speedOf(e) {
@@ -1068,7 +1183,7 @@ class GameScene extends Phaser.Scene {
   // --- waves
 
   nextWave() {
-    if (this.over) return;
+    if (this.over || this.transitioning) return;
     Bounties.finish(this);
     const s = this.stats;
     s.wave++;
@@ -1076,6 +1191,17 @@ class GameScene extends Phaser.Scene {
       this.achieve('wave_10');
       if (this.coop) this.achieve('coop_wave10');
     }
+    // Every ARENA_WAVES waves the arena rotates; its intro plays before the wave's heroes arrive.
+    const arena = arenaForWave(s.wave);
+    if (arena !== this.arena) {
+      this.changeArena(arena, () => this.time.delayedCall(1400, () => { if (!this.over) this.beginWave(); }));
+    } else {
+      this.beginWave();
+    }
+  }
+
+  beginWave() {
+    const s = this.stats;
     if (!this.boss) Music.play('main', this.mainBpm());
     if (s.wave % BOSS_EVERY === 0 && !this.boss) {
       this.startBoss();
@@ -1497,7 +1623,7 @@ class GameScene extends Phaser.Scene {
   }
 
   togglePause() {
-    if (this.over) return;
+    if (this.over || this.transitioning) return;
     this.paused = !this.paused;
     if (this.paused) {
       this.physics.world.pause();
@@ -1553,6 +1679,11 @@ class GameScene extends Phaser.Scene {
       else this.spawnEnemy(what);
     }
     if (Phaser.Input.Keyboard.JustDown(k.G)) this.goblins[0].carried += 10;
+    // V: jump to the next arena.
+    if (Phaser.Input.Keyboard.JustDown(k.V) && !this.transitioning) {
+      const next = ARENAS[(ARENAS.indexOf(this.arena) + 1) % ARENAS.length];
+      this.changeArena(next, () => {});
+    }
   }
 
   // ---------------------------------------------------------------- loop
@@ -1568,7 +1699,8 @@ class GameScene extends Phaser.Scene {
       const on = Music.toggle();
       this.floatText(W / 2, HUD_H + 30, on ? 'MUSIC ON' : 'MUSIC OFF', '#9badb7', 16);
     }
-    if (this.paused || this.over) {
+    // Everything freezes while paused, after game over, and during an arena change fade.
+    if (this.paused || this.over || this.transitioning) {
       this.rollRequests.clear();
       this.abilityRequests.clear();
       this.rerollRequested = false;

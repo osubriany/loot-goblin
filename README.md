@@ -10,7 +10,7 @@ There's no build step. Serve the folder with any static web server and open it i
 py -m http.server 8765
 ```
 
-Then go to http://localhost:8765/. Add `?debug=1` to the URL for test keys: 1–7 and T spawn heroes, 8–0 spawn power-ups, C spawns a chest, B rolls a barrel, G adds 10 gold.
+Then go to http://localhost:8765/. Add `?debug=1` to the URL for test keys: 1–7 and T spawn heroes, 8–0 spawn power-ups, C spawns a chest, B rolls a barrel, G adds 10 gold, V jumps to the next arena.
 
 ## Controls
 
@@ -35,6 +35,7 @@ Heroes scale with your total upgrade level ("hero threat"): they get faster, att
 ## Features
 
 - Solo and 2-player co-op, with revives
+- 4 rotating arenas (Dungeon, Crypt, Library, Lava Cave), each with its own layout and hazards, changing every 5 waves
 - 9 hero types, including a Paladin boss every 10 waves
 - Power-ups, treasure chests, spike traps, rolling barrels and bear traps
 - Combo, haul and bounty-streak score multipliers

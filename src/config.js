@@ -14,19 +14,8 @@ const MIN_SPEED = 70;
 const WEIGHT_FACTOR = 0.08;      // speed = BASE / (1 + carried * WEIGHT_FACTOR)
 const WAVE_MS = 20000;
 
-// Doors are wall tiles where adventurers enter; `inner` is the floor tile they appear on.
-const DOORS = [
-  { tile: [12, 0], inner: [12, 1] },
-  { tile: [0, 8], inner: [1, 8] },
-  { tile: [23, 8], inner: [22, 8] },
-];
-
-const PILLARS = [
-  [5, 4], [6, 4], [17, 4], [18, 4],
-  [5, 13], [6, 13], [17, 13], [18, 13],
-  [11, 8], [12, 8], [11, 9], [12, 9],
-];
-
+// Arena layouts (doors, pillars, hazards) live in arenas.js. The stash, player starts and stash
+// spikes are the same in every arena, so arenas must keep that bottom-left corner clear.
 const STASH_TILE = [2, 15];
 const PLAYER_STARTS = [[4, 13], [4, 11]]; // P1, P2
 
@@ -86,11 +75,7 @@ const CHEST = { firstWave: 3, every: 40000, lifetime: 15000, openTime: 600, base
 // Coins grabbed within `window` ms of each other chain; the best chain of a trip boosts the bank.
 const COMBO = { window: 1500, step: 0.05, maxMult: 1.5 };
 
-// Spike traps: each group of tiles cycles off -> warn -> on, staggered per group.
-const SPIKE_GROUPS = [
-  [[8, 6], [9, 6]], [[14, 6], [15, 6]],
-  [[8, 11], [9, 11]], [[14, 11], [15, 11]],
-];
+// Spike/lava traps: each group of tiles cycles off -> warn -> on, staggered per group.
 const SPIKE_CYCLE = { off: 2500, warn: 500, on: 1500 };
 
 const BARREL = { firstWave: 6, every: 20000, chance: 0.5, speed: 240, telegraph: 1000, minLane: 8 };

@@ -371,7 +371,8 @@ class GameScene extends Phaser.Scene {
         combo: 0,          // current pickup chain
         comboUntil: 0,     // chain breaks after this
         tripCombo: 0,      // best chain since the last bank
-        buffs: { boots: 0, smoke: 0 },
+        buffs: { boots: 0, smoke: 0 },   // buff -> clock time it ends
+        buffLen: {},                     // buff -> full length of the current buff (for HUD bars)
         nextTrail: 0,
         down: false,
         reviveProgress: 0,
@@ -698,7 +699,7 @@ class GameScene extends Phaser.Scene {
     coin.body.enable = false;
     g.carried += coin.value;
     Sfx.play(coin.gem ? 'gem' : 'coin');
-    this.registerPickup(g);
+    if (!coin.magnetPulled) this.registerPickup(g); // Coin Magnet pulls don't build combos
     Bounties.event(this, 'coin');
     if (coin.value > 1) this.floatText(coin.x, coin.y - 12, `+${coin.value}`, coin.gem ? '#5fcde4' : '#fbf236', 16);
     this.tweens.killTweensOf(coin);
@@ -1332,7 +1333,7 @@ class GameScene extends Phaser.Scene {
       const on = left > 0 && !g.down;
       b.icon.setVisible(on);
       b.bar.setVisible(on);
-      if (on) b.bar.setScale(left / this.buffDuration(g, b.kind), 1);
+      if (on) b.bar.setScale(Math.min(1, left / (g.buffLen[b.kind] || this.buffDuration(g, b.kind))), 1);
     }
 
     const chaining = g.combo >= 2;
@@ -1443,7 +1444,7 @@ class GameScene extends Phaser.Scene {
         this.floatText(target.x, target.y - 40, 'TOO TOUGH!', '#9badb7', 14);
         return MISS_CD;
       }
-      this.stunEnemy(target, 1500);
+      this.stunEnemy(target, ABILITY_STATS.shiv.bossStun);
       return ABILITY_STATS.shiv.cooldown[lvl - 1];
     }
     this.killEnemy(target);
@@ -1469,7 +1470,13 @@ class GameScene extends Phaser.Scene {
   }
 
   // Drop a patch of caltrops behind you; heroes that step in are stunned (once every few seconds).
+  // Only a couple of patches can be out; a new one replaces the oldest.
   useCaltrops(g, lvl) {
+    const stats = ABILITY_STATS.caltrops;
+    while (this.caltrops.length >= stats.maxPatches) {
+      const old = this.caltrops.shift();
+      this.tweens.add({ targets: old.gfx, alpha: 0, duration: 200, onComplete: () => old.gfx.destroy() });
+    }
     const pc = g.body.center, back = -this.facing(g);
     const x = pc.x + back * 18, y = pc.y;
     const gfx = this.add.graphics({ x, y }).setDepth(3);
@@ -1494,8 +1501,8 @@ class GameScene extends Phaser.Scene {
       for (const e of this.enemies.getChildren()) {
         if (e.gone || e.spawning || (e.caltropSafe || 0) > this.clock) continue;
         if (Phaser.Math.Distance.Between(e.body.center.x, e.body.center.y, p.x, p.y) < p.r) {
-          e.caltropSafe = this.clock + 3000;
-          this.stunEnemy(e, 1500, 'hazard');
+          e.caltropSafe = this.clock + ABILITY_STATS.caltrops.immunity;
+          this.stunEnemy(e, ABILITY_STATS.caltrops.stun, 'hazard');
         }
       }
       return true;
@@ -1511,6 +1518,7 @@ class GameScene extends Phaser.Scene {
     for (const coin of this.coins.getChildren()) {
       if (!coin.ready || coin.collected || Phaser.Math.Distance.Between(pc.x, pc.y, coin.x, coin.y) > r) continue;
       coin.ready = false;
+      coin.magnetPulled = true;
       this.tweens.killTweensOf(coin);
       this.tweens.add({
         targets: coin, x: pc.x, y: pc.y, duration: 250, ease: 'Quad.easeIn',
@@ -1521,7 +1529,10 @@ class GameScene extends Phaser.Scene {
   }
 
   useSmokePouch(g, lvl) {
-    g.buffs.smoke = this.clock + this.buffDuration(g, 'smoke');
+    // Shadow gets +50% on pouch smoke (it doubles Smoke Bomb pickups, which are rarer).
+    const len = POWERUPS.smoke.duration * (g.perk === 'shadow' ? ABILITY_STATS.smokepouch.shadowBonus : 1);
+    g.buffs.smoke = this.clock + len;
+    g.buffLen.smoke = len;
     PowerUps.smokePuff(this, g);
     Sfx.play('powerup');
     return ABILITY_STATS.smokepouch.cooldown[lvl - 1];
@@ -1555,6 +1566,14 @@ class GameScene extends Phaser.Scene {
     const d = this.decoy;
     if (!d) return;
     if (this.clock >= d.until) { this.endDecoy(); return; }
+    // A hero that reaches the decoy pops it, so where you throw it matters.
+    const reached = this.enemies.getChildren().some((e) => !e.gone && !e.spawning && e.mode !== 'stun'
+      && this.targetFor(e) === d && Phaser.Math.Distance.Between(e.body.center.x, e.body.center.y, d.x, d.y) < 18);
+    if (reached) {
+      this.floatText(d.x, d.y - 20, 'POP!', '#fbf236', 14);
+      this.endDecoy();
+      return;
+    }
     if (this.clock >= d.nextRing) {
       this.ring(d.x, d.y, 30, 0xfbf236);
       d.nextRing = this.clock + 500;

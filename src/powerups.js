@@ -65,7 +65,8 @@ const PowerUps = {
         scene.stats.banked += 10;
       }
     } else {
-      g.buffs[kind] = scene.clock + scene.buffDuration(g, kind);
+      g.buffLen[kind] = scene.buffDuration(g, kind);
+      g.buffs[kind] = scene.clock + g.buffLen[kind];
       if (kind === 'smoke') PowerUps.smokePuff(scene, g);
     }
   },

@@ -2,12 +2,18 @@
 // Each level costs more than the last. kind: 'attr' (passive), 'ability' (one equipped per run,
 // used with E / Y), 'perk' (one-off run bonuses). desc(level) describes the effect at that level.
 
+// Balance notes: keep each ability's uptime well under 100% so runs stay risky.
 const ABILITY_STATS = {
-  shiv: { cooldown: [90000, 75000, 60000] }, // instant kills are strong: 1.5 / 1.25 / 1 minute
-  caltrops: { cooldown: [10000, 8000, 6000], duration: [5000, 6000, 7000] },
-  coinmagnet: { cooldown: [9000, 7000, 5000], radius: [150, 200, 260] },
-  smokepouch: { cooldown: [16000, 11000] },
-  decoy: { cooldown: [12000, 8000], duration: [3000, 5000] },
+  // Instant kills are strong: 1.5 / 1.25 / 1 minute. Level 3 stuns bosses (never kills them).
+  shiv: { cooldown: [90000, 75000, 60000], bossStun: 3000 },
+  // At most `maxPatches` out at once; each hero is immune for `immunity` ms after a stun.
+  caltrops: { cooldown: [14000, 12000, 10000], duration: [4000, 5000, 6000], stun: 1200, immunity: 4000, maxPatches: 2 },
+  // Pulled coins don't count toward combos (otherwise every pull is a free 5+ chain).
+  coinmagnet: { cooldown: [15000, 12000, 10000], radius: [120, 160, 200] },
+  // The Shadow skin extends pouch smoke by 50% (it still doubles Smoke Bomb pickups).
+  smokepouch: { cooldown: [20000, 16000], shadowBonus: 1.5 },
+  // The decoy pops early when a hero reaches it.
+  decoy: { cooldown: [16000, 12000], duration: [3000, 4000] },
 };
 
 // Short durations as seconds ("12s"), a minute or more as minutes ("1.25 min").
@@ -33,7 +39,7 @@ const UPGRADES = {
     desc: (l) => `${secs(ABILITY_STATS.caltrops.duration[l - 1])} stun patch, ${secs(ABILITY_STATS.caltrops.cooldown[l - 1])} cd`,
   },
   coinmagnet: {
-    kind: 'ability', name: 'Coin Magnet', costs: [150, 300, 500],
+    kind: 'ability', name: 'Coin Magnet', costs: [200, 350, 600],
     desc: (l) => `pull coins in ${ABILITY_STATS.coinmagnet.radius[l - 1]}px, ${secs(ABILITY_STATS.coinmagnet.cooldown[l - 1])} cd`,
   },
   smokepouch: {

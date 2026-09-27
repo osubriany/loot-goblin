@@ -4,6 +4,8 @@ class ShopScene extends Phaser.Scene {
   constructor() { super('Shop'); }
 
   create() {
+    // Phaser reuses this scene object between visits, so per-visit state must be reset here.
+    this.leaving = false;
     Music.play('menu');
     this.add.tileSprite(0, 0, W, H, 'floor').setOrigin(0).setAlpha(0.35);
     this.add.text(W / 2, 30, 'GOBLIN SHOP', textStyle(32, '#fbf236')).setOrigin(0.5);

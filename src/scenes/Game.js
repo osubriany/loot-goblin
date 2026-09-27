@@ -23,7 +23,7 @@ class GameScene extends Phaser.Scene {
   create(data) {
     this.coop = !!(data && data.coop);
     this.stats = {
-      banked: 0, wave: 1, elapsed: 0, coinsBanked: 0, goldLost: 0, bestHaul: 0,
+      banked: 0, wave: 1, elapsed: 0, coinsBanked: 0, goldEarned: 0, goldLost: 0, bestHaul: 0,
       bounties: 0, streak: 0, bestStreak: 0, chests: 0, hazardStuns: 0, kills: 0, coop: this.coop,
     };
     // Shop upgrades are read once per run: id -> level (0 = not owned).
@@ -440,10 +440,14 @@ class GameScene extends Phaser.Scene {
     return this.iceZones.some((z) => Phaser.Math.Distance.Between(pc.x, pc.y, z.x, z.y) < z.r);
   }
 
-  currentSpeed(g) {
+  // 1 when unloaded, smaller the more gold you carry (Feather Boots and Strong Back help).
+  loadFactor(g) {
     const weight = this.buffActive(g, 'boots') ? 0 : g.carried;
-    const factor = WEIGHT_FACTOR * (1 - 0.12 * this.upg.back); // Strong Back
-    let speed = Math.max(MIN_SPEED, BASE_SPEED / (1 + weight * factor));
+    return 1 / (1 + weight * WEIGHT_FACTOR * (1 - 0.12 * this.upg.back)); // Strong Back
+  }
+
+  currentSpeed(g) {
+    let speed = Math.max(MIN_SPEED, BASE_SPEED * this.loadFactor(g));
     speed *= 1 + 0.05 * this.upg.speed; // Nimble Feet
     if (g.perk === 'chonk') speed *= 0.9;
     return this.onIce(g) ? speed * 0.5 : speed;
@@ -523,12 +527,15 @@ class GameScene extends Phaser.Scene {
     let { vx, vy } = this.inputDir(g);
     if (!vx && !vy) vx = g.flipX ? -1 : 1;
     const len = Math.hypot(vx, vy);
-    g.setVelocity((vx / len) * ROLL.speed, (vy / len) * ROLL.speed);
+    // Heavy goblins roll shorter, so rolling never beats the weight mechanic.
+    const rollSpeed = ROLL.speed * Math.pow(this.loadFactor(g), ROLL.loadExponent);
+    g.setVelocity((vx / len) * rollSpeed, (vy / len) * rollSpeed);
     if (this.clock < g.rootedUntil) this.achieve('roll_escape');
     g.rootedUntil = 0; // rolling wrenches free of a bear trap
     g.rollUntil = this.clock + ROLL.duration;
-    const rollCd = ROLL.cooldown * (1 - 0.15 * this.upg.roll) * (g.perk === 'sprinter' ? 0.5 : 1); // Quick Roll
-    g.nextRoll = this.clock + rollCd;
+    const rollCd = ROLL.cooldown * (1 - 0.15 * this.upg.roll) // Quick Roll
+      * (g.perk === 'sprinter' ? SKIN_PERKS.sprinterRollCd : 1);
+    g.nextRoll = this.clock + Math.max(ROLL.minCooldown, rollCd);
     g.invulnUntil = Math.max(g.invulnUntil, g.rollUntil + ROLL.iframes);
 
     if (g.carried > 0 && g.perk !== 'ember') {
@@ -583,6 +590,11 @@ class GameScene extends Phaser.Scene {
     g.tripCombo = 0;
     Bounties.event(this, 'hit');
     if (this.boss && this.boss.mode !== 'leave') this.bossHit = true;
+    // Frost perk: a hero that lands a hit gets chilled (slowed, tinted icy) for a moment.
+    if (g.perk === 'frost' && src.kind) {
+      src.chillUntil = this.clock + SKIN_PERKS.frostChill.ms;
+      this.floatText(src.x, src.y - 26, 'CHILLED', '#9fdcf2', 12);
+    }
 
     const pc = g.body.center;
     const a = Phaser.Math.Angle.Between(src.x, src.y, pc.x, pc.y);
@@ -814,7 +826,15 @@ class GameScene extends Phaser.Scene {
     s.banked += pts;
     s.coinsBanked += c;
     s.bestHaul = Math.max(s.bestHaul, c);
-    Progress.addGold(c); // banked coins become shop gold
+    // Banked coins become shop gold. Classic's +5% accumulates fractions so small banks still count.
+    let gold = c;
+    if (g.perk === 'classic') {
+      g.goldBonus = (g.goldBonus || 0) + c * SKIN_PERKS.classicGold;
+      gold += Math.floor(g.goldBonus);
+      g.goldBonus -= Math.floor(g.goldBonus);
+    }
+    Progress.addGold(gold);
+    s.goldEarned += gold;
     g.carried = 0;
     g.combo = 0;
     g.tripCombo = 0;
@@ -967,7 +987,8 @@ class GameScene extends Phaser.Scene {
   }
 
   speedOf(e) {
-    return e.speed * (e.blessUntil > this.clock ? 1.35 : 1);
+    return e.speed * (e.blessUntil > this.clock ? 1.35 : 1)
+      * ((e.chillUntil || 0) > this.clock ? SKIN_PERKS.frostChill.speed : 1);
   }
 
   moveToward(e, target, speed) {
@@ -1040,7 +1061,8 @@ class GameScene extends Phaser.Scene {
     }
     if (e.gone) return;
 
-    const tint = e.windTint || (e.blessUntil > this.clock ? 0xfff3a0 : null);
+    const chilled = (e.chillUntil || 0) > this.clock;
+    const tint = e.windTint || (chilled ? 0x9fdcf2 : null) || (e.blessUntil > this.clock ? 0xfff3a0 : null);
     if (tint) e.setTint(tint); else e.clearTint();
     if (Math.abs(e.body.velocity.x) > 1) e.setFlipX(e.body.velocity.x < 0);
     e.setDepth(e.y);

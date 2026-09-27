@@ -89,7 +89,7 @@ class GameOverScene extends Phaser.Scene {
   // cheapest next upgrade.
   createGoldPanel(stats) {
     const after = Progress.load().wallet;
-    const earned = stats.coinsBanked || 0;
+    const earned = stats.goldEarned ?? stats.coinsBanked ?? 0; // shop gold, incl. Classic's bonus
     const before = Math.max(0, after - earned);
     const goal = this.nextGoal(after);
 

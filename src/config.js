@@ -68,7 +68,17 @@ const BOSS_EVERY = 10;           // every Nth wave is a boss wave
 const BOSS_DURATION = 30000;     // survive this long for the bonus
 const ICE_RADIUS = 32;
 
-const ROLL = { speed: 480, duration: 180, cooldown: 1500, iframes: 100 };
+// minCooldown: floor however roll upgrades and perks stack.
+// loadExponent: rolls shrink with carried weight (walking slowdown ^ this), so rolling is a
+// dodge rather than a way around weight; 30 gold rolls about 60% as far.
+const ROLL = { speed: 480, duration: 180, cooldown: 1500, iframes: 100, minCooldown: 700, loadExponent: 0.4 };
+
+// Skin perk numbers (see SKINS in progress.js).
+const SKIN_PERKS = {
+  sprinterRollCd: 0.7,       // Sprinter: roll cooldown x0.7
+  frostChill: { ms: 2000, speed: 0.6 }, // Frost: heroes that hit you move at 60% for 2s
+  classicGold: 0.05,         // Classic: +5% shop gold from banking
+};
 
 const CHEST = { firstWave: 3, every: 40000, lifetime: 15000, openTime: 600, baseValue: 10 };
 

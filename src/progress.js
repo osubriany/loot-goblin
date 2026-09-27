@@ -22,12 +22,12 @@ const ACHIEVEMENTS = [
 
 // map: goblin sprite palette swaps (G/g skin, b/B clothes). unlock: achievement id (none = free).
 const SKINS = [
-  { id: 'classic', name: 'Classic', map: {}, color: '#6abe30', trail: 0x6abe30, perk: 'No perk. A true classic.' },
-  { id: 'frost', name: 'Frost', map: { G: 'i', g: 'I' }, color: '#9fdcf2', trail: 0x5fcde4, perk: 'Ice patches never slow you' },
+  { id: 'classic', name: 'Classic', map: {}, color: '#6abe30', trail: 0x6abe30, perk: '+5% shop gold from banking' },
+  { id: 'frost', name: 'Frost', map: { G: 'i', g: 'I' }, color: '#9fdcf2', trail: 0x5fcde4, perk: 'Immune to ice; chills heroes that hit you' },
   { id: 'ember', name: 'Ember', map: { G: 'R', g: 'r' }, color: '#d95763', trail: 0xd95763, perk: 'Dodge rolls cost no gold', unlock: 'haul_20' },
   { id: 'shadow', name: 'Shadow', map: { G: 'v', g: 'V', b: 'm', B: 'e' }, color: '#b48cff', trail: 0x76428a, perk: 'Smoke bombs last twice as long', unlock: 'combo_11' },
   { id: 'chonk', name: 'Chonk', map: { G: 'L', g: 'l' }, color: '#9bab3c', trail: 0x9bab3c, perk: '4 hearts, but 10% slower', unlock: 'wave_10', scale: 1.12 },
-  { id: 'sprinter', name: 'Sprinter', map: { G: 'D', g: 'd' }, color: '#5fcde4', trail: 0x5fcde4, perk: 'Roll cooldown is halved', unlock: 'streak_5' },
+  { id: 'sprinter', name: 'Sprinter', map: { G: 'D', g: 'd' }, color: '#5fcde4', trail: 0x5fcde4, perk: 'Roll cooldown 30% shorter', unlock: 'streak_5' },
   { id: 'ghost', name: 'Ghost', map: { G: 'n', g: 's', b: 'S', B: 's' }, color: '#e8e4d8', trail: 0xe8e4d8, perk: 'Revives 2x faster, longer safety after hits', unlock: 'revive' },
   { id: 'golden', name: 'Golden', map: { G: 'y', g: 'Y' }, color: '#fbf236', trail: 0xfbf236, perk: '+10% points when banking', unlock: 'score_2000' },
 ];

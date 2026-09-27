@@ -15,8 +15,22 @@ class GameScene extends Phaser.Scene {
     this.coop = !!(data && data.coop);
     this.stats = {
       banked: 0, wave: 1, elapsed: 0, coinsBanked: 0, goldLost: 0, bestHaul: 0,
-      bounties: 0, streak: 0, bestStreak: 0, chests: 0, hazardStuns: 0, coop: this.coop,
+      bounties: 0, streak: 0, bestStreak: 0, chests: 0, hazardStuns: 0, kills: 0, coop: this.coop,
     };
+    // Shop upgrades are read once per run: id -> level (0 = not owned).
+    this.upg = Object.fromEntries(Object.keys(UPGRADES).map((id) => [id, Progress.level(id)]));
+    const equipped = Progress.load().equipped;
+    this.ability = equipped && this.upg[equipped] ? equipped : null;
+    // Heroes scale with how powered-up the goblins are.
+    this.threat = threatLevel();
+    this.heroSpeedMul = 1 + this.threat * THREAT.speedPer;
+    this.heroCdMul = 1 - this.threat * THREAT.cooldownPer;
+    this.stats.power = Progress.power();
+    this.decoy = null;
+    this.caltrops = [];
+    this.abilityRequests = new Set();
+    this.rerollRequested = false;
+    this.rerolledWave = 0;
     this.bossHit = false;    // for the "Untouchable" achievement
     this.toastQueue = [];
     this.toastBusy = false;
@@ -64,18 +78,24 @@ class GameScene extends Phaser.Scene {
 
     this.createHud();
     this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,P,ESC,M,N,G,' + Object.keys(DEBUG_SPAWNS).join(','));
-    // Rolls come from raw key events so left/right Shift can belong to different players.
+    // Rolls and abilities come from raw key events so left/right keys can belong to different players.
     const onKey = (ev) => {
       if (ev.repeat) return;
-      for (const g of this.goblins) if (g.controls.roll.includes(ev.code)) this.rollRequests.add(g);
+      for (const g of this.goblins) {
+        if (g.controls.roll.includes(ev.code)) this.rollRequests.add(g);
+        if (g.controls.ability.includes(ev.code)) this.abilityRequests.add(g);
+      }
+      if (ev.code === 'KeyR') this.rerollRequested = true;
     };
     this.input.keyboard.on('keydown', onKey);
-    // Gamepad N drives goblin N: face buttons / right bumper roll, Start pauses.
+    // Gamepad N drives goblin N: face buttons / right bumper roll, Y ability, Back reroll, Start pauses.
     // The plugin's 'down' event passes (pad, button, value); the button knows its index.
     const onPad = (pad, { index }) => {
       if (index === PAD.pause) { this.togglePause(); return; }
+      if (index === PAD.reroll) { this.rerollRequested = true; return; }
       const g = this.goblins[this.padIndex(pad)];
       if (g && PAD.roll.includes(index)) this.rollRequests.add(g);
+      if (g && index === PAD.ability) this.abilityRequests.add(g);
     };
     if (this.input.gamepad) this.input.gamepad.on('down', onPad);
     this.events.once('shutdown', () => {
@@ -93,7 +113,11 @@ class GameScene extends Phaser.Scene {
     });
     this.time.delayedCall(2500, () => this.spawnEnemy('knight'));
     if (this.coop) this.time.delayedCall(6000, () => this.spawnEnemy('knight'));
+    if (this.threat >= 15) this.time.delayedCall(9000, () => this.spawnEnemy('knight'));
 
+    if (this.upg.headstart) {
+      for (const g of this.goblins) g.buffs.boots = POWERUPS.boots.duration;
+    }
     for (let i = 0; i < 4; i++) this.spawnRandomCoin();
     this.computeFlowField();
     this.banner('WAVE 1', 'Grab gold, bank it at your STASH');
@@ -211,7 +235,7 @@ class GameScene extends Phaser.Scene {
       const skin = `gob_${def.id}`;
       const g = this.physics.add.sprite(x, y, `${skin}_0`);
       g.body.setSize(14, 12).setOffset(9, 18);
-      const maxHearts = def.id === 'chonk' ? 4 : 3;
+      const maxHearts = (def.id === 'chonk' ? 4 : 3) + this.upg.hearts; // Tough Hide
       Object.assign(g, {
         idx: i,
         skin,
@@ -238,6 +262,9 @@ class GameScene extends Phaser.Scene {
         down: false,
         reviveProgress: 0,
         flow: null,
+        secondWinds: this.upg.secondwind,
+        abilityReadyAt: 0,
+        abilityCd: 1,
       });
       this.goblins.push(g);
     }
@@ -260,9 +287,16 @@ class GameScene extends Phaser.Scene {
 
   currentSpeed(g) {
     const weight = this.buffActive(g, 'boots') ? 0 : g.carried;
-    let speed = Math.max(MIN_SPEED, BASE_SPEED / (1 + weight * WEIGHT_FACTOR));
+    const factor = WEIGHT_FACTOR * (1 - 0.12 * this.upg.back); // Strong Back
+    let speed = Math.max(MIN_SPEED, BASE_SPEED / (1 + weight * factor));
+    speed *= 1 + 0.05 * this.upg.speed; // Nimble Feet
     if (g.perk === 'chonk') speed *= 0.9;
     return this.onIce(g) ? speed * 0.5 : speed;
+  }
+
+  // Hero attack cooldowns shrink as hero threat rises.
+  cd(ms) {
+    return ms * this.heroCdMul;
   }
 
   // Which connected gamepad (0, 1, ...) this pad is, so pad N can drive goblin N.
@@ -275,7 +309,9 @@ class GameScene extends Phaser.Scene {
   }
 
   // Nearest goblin a hero can go after: not down and not hidden by a smoke bomb.
+  // An active decoy coin draws everyone except the Paladin (too wise) and Trapper (busy).
   targetFor(e) {
+    if (this.decoy && e.kind !== 'paladin' && e.kind !== 'trapper') return this.decoy;
     let best = null, bestD = Infinity;
     for (const g of this.goblins) {
       if (g.down || this.buffActive(g, 'smoke')) continue;
@@ -336,7 +372,8 @@ class GameScene extends Phaser.Scene {
     if (this.clock < g.rootedUntil) this.achieve('roll_escape');
     g.rootedUntil = 0; // rolling wrenches free of a bear trap
     g.rollUntil = this.clock + ROLL.duration;
-    g.nextRoll = this.clock + ROLL.cooldown * (g.perk === 'sprinter' ? 0.5 : 1);
+    const rollCd = ROLL.cooldown * (1 - 0.15 * this.upg.roll) * (g.perk === 'sprinter' ? 0.5 : 1); // Quick Roll
+    g.nextRoll = this.clock + rollCd;
     g.invulnUntil = Math.max(g.invulnUntil, g.rollUntil + ROLL.iframes);
 
     if (g.carried > 0 && g.perk !== 'ember') {
@@ -386,7 +423,7 @@ class GameScene extends Phaser.Scene {
   hurtPlayer(g, src) {
     if (this.over || g.down || this.clock < g.invulnUntil) return false;
     g.hearts--;
-    g.invulnUntil = this.clock + (g.perk === 'ghost' ? 2600 : 1600);
+    g.invulnUntil = this.clock + (g.perk === 'ghost' ? 2600 : 1600) + 400 * this.upg.iron; // Iron Will
     g.combo = 0;
     g.tripCombo = 0;
     Bounties.event(this, 'hit');
@@ -397,7 +434,7 @@ class GameScene extends Phaser.Scene {
     g.setVelocity(Math.cos(a) * 300, Math.sin(a) * 300);
     g.knockUntil = this.clock + 160;
 
-    const drop = Math.floor(g.carried / 2);
+    const drop = Math.floor((g.carried * (5 - this.upg.pockets)) / 10); // Deep Pockets: 50% -> 20%
     if (drop > 0) {
       g.carried -= drop;
       this.stats.goldLost += drop;
@@ -409,15 +446,35 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.shake(220, 0.012);
     this.cameras.main.flash(140, 160, 30, 30);
     Sfx.play('hit');
-    const icon = g.hud.hearts[g.hearts];
-    if (icon) this.tweens.add({ targets: icon, scale: 1.8, duration: 120, yoyo: true });
+    this.popHeart(g, g.hearts);
 
     if (g.hearts <= 0) {
+      if (g.secondWinds > 0) {
+        this.secondWind(g);
+        return true;
+      }
       this.knockOut(g);
       return true;
     }
     this.blink(g, 7);
     return true;
+  }
+
+  // "Second Wind" perk: get back up with 1 heart instead of going down.
+  secondWind(g) {
+    g.secondWinds--;
+    g.hearts = 1;
+    g.invulnUntil = this.clock + 2500;
+    this.blink(g, 11);
+    this.banner('SECOND WIND!', g.secondWinds ? `${g.secondWinds} left this run` : '');
+    this.sparks.explode(30, g.x, g.y);
+    Sfx.play('revive');
+  }
+
+  popHeart(g, i) {
+    const icons = g.hud.hearts;
+    const icon = icons[Math.min(i, icons.length - 1)];
+    if (icon) this.tweens.add({ targets: icon, scale: 1.8, duration: 130, yoyo: true });
   }
 
   // Out of hearts. Solo (or last goblin standing) ends the run; otherwise wait for a revive.
@@ -514,7 +571,7 @@ class GameScene extends Phaser.Scene {
     if (live >= cap) return;
     const spot = this.randomFreeSpot(96);
     if (!spot) return;
-    const gem = Math.random() < 0.08;
+    const gem = Math.random() < 0.08 + 0.04 * this.upg.luck; // Lucky Charm
     const coin = this.spawnCoin(spot.x, spot.y, gem ? 5 : 1, gem);
     coin.setScale(0);
     this.tweens.add({ targets: coin, scale: 1, duration: 250, ease: 'Back.easeOut' });
@@ -585,11 +642,12 @@ class GameScene extends Phaser.Scene {
     const haul = c >= 20 ? 2 : c >= 10 ? 1.5 : 1;
     const combo = this.comboMult(g);
     const streak = Bounties.streakMult(this);
-    const golden = g.perk === 'golden' ? 1.1 : 1;
+    const golden = (g.perk === 'golden' ? 1.1 : 1) * (1 + 0.05 * this.upg.greed); // Greedy Stash
     const pts = Math.round(c * haul * combo * streak * golden);
     s.banked += pts;
     s.coinsBanked += c;
     s.bestHaul = Math.max(s.bestHaul, c);
+    Progress.addGold(c); // banked coins become shop gold
     g.carried = 0;
     g.combo = 0;
     g.tripCombo = 0;
@@ -646,7 +704,7 @@ class GameScene extends Phaser.Scene {
 
     Object.assign(e, {
       kind: type,
-      speed: ENEMY_TYPES[type].speed * Math.min(1.4, 1 + (this.stats.wave - 1) * 0.03),
+      speed: ENEMY_TYPES[type].speed * Math.min(1.4, 1 + (this.stats.wave - 1) * 0.03) * this.heroSpeedMul,
       mode: 'move',
       spawning: true,
       gone: false,
@@ -746,7 +804,7 @@ class GameScene extends Phaser.Scene {
       e.setVelocity(0, 0);
       if (this.clock >= e.stunEnd) {
         e.mode = 'move';
-        e.nextCharge = this.clock + 2500;
+        e.nextCharge = this.clock + this.cd(2500);
         this.clearStars(e);
       }
     } else {
@@ -768,7 +826,8 @@ class GameScene extends Phaser.Scene {
 
   // Shoots at the goblin it aimed at, or whoever is nearest if that one went down or vanished.
   fireArrow(e, target) {
-    if (!target || target.down || this.buffActive(target, 'smoke')) target = this.targetFor(e);
+    const stale = !target || target.down || this.buffActive(target, 'smoke') || (target.isDecoy && target !== this.decoy);
+    if (stale) target = this.targetFor(e);
     if (!target) return;
     const from = e.body.center, to = target.body.center;
     const a = Phaser.Math.Angle.Between(from.x, from.y, to.x, to.y);
@@ -1027,7 +1086,10 @@ class GameScene extends Phaser.Scene {
       Sfx.play('wave');
       this.spawnEnemy(type);
       // Extra heroes: every 4th wave, and every other wave in co-op.
-      const extra = (s.wave % 4 === 0 ? 1 : 0) + (this.coop && s.wave % 2 === 0 ? 1 : 0);
+      // Hero threat: +1 hero every 3rd wave from threat 10, every 2nd from 20, every wave from 30.
+      const threatEvery = this.threat >= 30 ? 1 : this.threat >= 20 ? 2 : this.threat >= 10 ? 3 : 0;
+      const extra = (s.wave % 4 === 0 ? 1 : 0) + (this.coop && s.wave % 2 === 0 ? 1 : 0)
+        + (threatEvery && s.wave % threatEvery === 0 ? 1 : 0);
       for (let i = 0; i < extra; i++) this.time.delayedCall(1500 * (i + 1), () => this.spawnEnemy(this.pickType()));
     }
     Bounties.start(this);
@@ -1052,7 +1114,7 @@ class GameScene extends Phaser.Scene {
     this.timeText = this.add.text(W - 14, top, '0:00', textStyle(16, '#9badb7')).setOrigin(1, 0.5).setDepth(D + 1);
 
     if (!this.coop) {
-      this.add.text(14, foot, 'SHIFT/SPACE roll    P pause    M mute    N music', textStyle(12, '#6b6880')).setOrigin(0, 0.5).setDepth(D + 1);
+      this.add.text(14, foot, 'SHIFT/SPACE roll   E ability   P pause   M mute   N music', textStyle(12, '#6b6880')).setOrigin(0, 0.5).setDepth(D + 1);
     }
 
     // Bounty board: bottom bar, right side.
@@ -1081,8 +1143,14 @@ class GameScene extends Phaser.Scene {
     const x0 = this.coop ? 26 : 0;
     const h = {};
     if (this.coop) this.add.text(4, y, g.label, textStyle(13, g.color)).setOrigin(0, 0.5).setDepth(D + 1);
-    const spacing = g.maxHearts > 3 ? 23 : 28;
-    h.hearts = Array.from({ length: g.maxHearts }, (_, i) => this.add.image(x0 + 22 + i * spacing, y, 'heart').setDepth(D + 1));
+    if (g.maxHearts > 4) {
+      // Too many to draw: one heart and an "n/max" count.
+      h.hearts = [this.add.image(x0 + 22, y, 'heart').setDepth(D + 1)];
+      h.heartText = this.add.text(x0 + 38, y, '', textStyle(16, '#d95763')).setOrigin(0, 0.5).setDepth(D + 1);
+    } else {
+      const spacing = g.maxHearts > 3 ? 23 : 28;
+      h.hearts = Array.from({ length: g.maxHearts }, (_, i) => this.add.image(x0 + 22 + i * spacing, y, 'heart').setDepth(D + 1));
+    }
     this.add.image(x0 + 118, y, 'coin_0').setDepth(D + 1);
     h.carried = this.add.text(x0 + 132, y, '0', textStyle(20, '#fbf236')).setOrigin(0, 0.5).setDepth(D + 1);
     this.add.text(x0 + 186, y, 'SPEED', textStyle(12, '#9badb7')).setOrigin(0, 0.5).setDepth(D + 1);
@@ -1100,12 +1168,31 @@ class GameScene extends Phaser.Scene {
     h.comboText = this.add.text(40, comboY, '', textStyle(14, '#ff9f43')).setOrigin(0, 0.5).setDepth(D + 1);
     h.comboBar = this.add.rectangle(40, comboY + 11, 80, 3, 0xff9f43).setOrigin(0, 0.5).setDepth(D + 1);
     h.tripText = this.add.text(150, comboY, '', textStyle(12, '#fbf236')).setOrigin(0, 0.5).setDepth(D + 1);
+    // Equipped ability: key + name with a recharge bar, on the same wall row as the combo.
+    if (this.ability) {
+      const name = UPGRADES[this.ability].name.toUpperCase();
+      h.abilityText = this.add.text(560, comboY, `${g.controls.abilityKey}: ${name}`, textStyle(12, g.color)).setOrigin(0, 0.5).setDepth(D + 1);
+      this.add.rectangle(560, comboY + 11, 90, 3, 0x2a2438).setOrigin(0, 0.5).setDepth(D + 1);
+      h.abilityBar = this.add.rectangle(560, comboY + 11, 90, 3, 0xfbf236).setOrigin(0, 0.5).setDepth(D + 2);
+    }
     g.hud = h;
   }
 
   updatePlayerHud(g) {
     const h = g.hud;
-    h.hearts.forEach((icon, i) => icon.setTexture(i < g.hearts ? 'heart' : 'heart_empty'));
+    if (h.heartText) {
+      h.hearts[0].setTexture(g.hearts > 0 ? 'heart' : 'heart_empty');
+      h.heartText.setText(`${g.hearts}/${g.maxHearts}`);
+    } else {
+      h.hearts.forEach((icon, i) => icon.setTexture(i < g.hearts ? 'heart' : 'heart_empty'));
+    }
+    if (h.abilityText) {
+      const left = g.abilityReadyAt - this.clock;
+      const ready = left <= 0 && !g.down;
+      h.abilityText.setAlpha(ready ? 1 : 0.6);
+      h.abilityBar.setScale(ready ? 1 : Phaser.Math.Clamp(1 - left / g.abilityCd, 0, 1), 1);
+      h.abilityBar.fillColor = ready ? 0x6abe30 : 0xfbf236;
+    }
     h.carried.setText(g.down ? 'DOWN' : String(g.carried)).setColor(g.down ? '#d95763' : '#fbf236');
     const f = g.down ? 0 : Math.min(1, this.currentSpeed(g) / BASE_SPEED);
     h.speedBar.setScale(f, 1);
@@ -1132,7 +1219,8 @@ class GameScene extends Phaser.Scene {
   updateBountyHud() {
     const b = this.bounty;
     if (!b) return;
-    this.bountyText.setText(b.def.text(b.target));
+    this.bountyLabel.setText(Bounties.canReroll(this) ? 'BOUNTY [R]' : 'BOUNTY');
+    this.bountyText.setX(this.bountyLabel.x + this.bountyLabel.width + 6).setText(b.def.text(b.target));
     let prog;
     if (b.done) prog = 'DONE!';
     else if (b.failed) prog = 'FAILED';
@@ -1164,6 +1252,186 @@ class GameScene extends Phaser.Scene {
     this.timeText.setText(`${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`);
   }
 
+  // ---------------------------------------------------------------- shop abilities & attributes
+
+  // "Magnet Paws": grab ready coins within a radius without touching them.
+  magnetPaws(g) {
+    if (!this.upg.magnet || g.down) return;
+    const r = 18 + 12 * this.upg.magnet;
+    const pc = g.body.center;
+    for (const coin of this.coins.getChildren()) {
+      if (coin.ready && !coin.collected && Phaser.Math.Distance.Between(pc.x, pc.y, coin.x, coin.y) < r) this.collectCoin(g, coin);
+    }
+  }
+
+  // The equipped ability (E / Y). Each use function returns its cooldown in ms.
+  useAbility(g) {
+    if (!this.ability || g.down) return;
+    if (this.clock < g.abilityReadyAt) { Sfx.play('nope'); return; }
+    const lvl = this.upg[this.ability];
+    const use = {
+      shiv: () => this.useShiv(g, lvl),
+      caltrops: () => this.useCaltrops(g, lvl),
+      coinmagnet: () => this.useCoinMagnet(g, lvl),
+      smokepouch: () => this.useSmokePouch(g, lvl),
+      decoy: () => this.useDecoy(g, lvl),
+    }[this.ability];
+    const cd = use();
+    g.abilityCd = cd;
+    g.abilityReadyAt = this.clock + cd;
+  }
+
+  facing(g) {
+    return g.flipX ? -1 : 1;
+  }
+
+  // Stab the nearest hero in front: it's taken out for good. The Paladin only gets stunned (level 3).
+  useShiv(g, lvl) {
+    const pc = g.body.center, dir = this.facing(g);
+    const slash = this.add.graphics().setDepth(900);
+    slash.lineStyle(3, 0xffffff, 0.9).beginPath();
+    slash.arc(pc.x + dir * 10, pc.y - 4, 24, dir > 0 ? -1 : Math.PI - 1, dir > 0 ? 1 : Math.PI + 1, false).strokePath();
+    this.tweens.add({ targets: slash, alpha: 0, duration: 180, onComplete: () => slash.destroy() });
+    Sfx.play('shiv');
+
+    let target = null, best = Infinity;
+    for (const e of this.enemies.getChildren()) {
+      if (e.gone || e.spawning) continue;
+      const ec = e.body.center;
+      const d = Phaser.Math.Distance.Between(pc.x, pc.y, ec.x, ec.y);
+      const reach = e.kind === 'paladin' ? 56 : 44;
+      // Anything touching counts; further out it has to be on the side we face.
+      if (d > reach || (d > 20 && Math.sign(ec.x - pc.x) !== dir)) continue;
+      if (d < best) { best = d; target = e; }
+    }
+    const cd = ABILITY_STATS.shiv.cooldown[lvl - 1];
+    if (!target) return 1000; // whiffed: short cooldown
+    if (target.kind === 'paladin') {
+      if (lvl >= 3) this.stunEnemy(target, 1500);
+      else this.floatText(target.x, target.y - 40, 'TOO TOUGH!', '#9badb7', 14);
+      return cd;
+    }
+    this.killEnemy(target);
+    return cd;
+  }
+
+  killEnemy(e) {
+    e.gone = true;
+    e.setVelocity(0, 0);
+    e.body.enable = false;
+    this.clearLine(e);
+    this.clearStars(e);
+    this.stats.kills++;
+    this.scatterCoins(2 + e.stolen, e.body.center);
+    this.floatText(e.x, e.y - 24, 'SHIV!', '#d95763', 16);
+    this.cameras.main.shake(100, 0.006);
+    Sfx.play('kill');
+    e.anims.stop();
+    e.setTintFill(0xd95763);
+    this.tweens.add({ targets: e, angle: 90, alpha: 0, y: e.y + 6, duration: 450, onComplete: () => e.destroy() });
+  }
+
+  // Drop a patch of caltrops behind you; heroes that step in are stunned (once every few seconds).
+  useCaltrops(g, lvl) {
+    const pc = g.body.center, back = -this.facing(g);
+    const x = pc.x + back * 18, y = pc.y;
+    const gfx = this.add.graphics({ x, y }).setDepth(3);
+    gfx.lineStyle(2, 0xcbdbfc, 0.9);
+    for (let i = 0; i < 9; i++) {
+      const cx = Phaser.Math.Between(-20, 20), cy = Phaser.Math.Between(-16, 16);
+      gfx.lineBetween(cx - 3, cy - 3, cx + 3, cy + 3).lineBetween(cx - 3, cy + 3, cx + 3, cy - 3);
+    }
+    gfx.setScale(0.3);
+    this.tweens.add({ targets: gfx, scale: 1, duration: 150, ease: 'Back.easeOut' });
+    this.caltrops.push({ x, y, r: 26, until: this.clock + ABILITY_STATS.caltrops.duration[lvl - 1], gfx });
+    Sfx.play('caltrops');
+    return ABILITY_STATS.caltrops.cooldown[lvl - 1];
+  }
+
+  updateCaltrops() {
+    this.caltrops = this.caltrops.filter((p) => {
+      if (this.clock >= p.until) {
+        this.tweens.add({ targets: p.gfx, alpha: 0, duration: 300, onComplete: () => p.gfx.destroy() });
+        return false;
+      }
+      for (const e of this.enemies.getChildren()) {
+        if (e.gone || e.spawning || (e.caltropSafe || 0) > this.clock) continue;
+        if (Phaser.Math.Distance.Between(e.body.center.x, e.body.center.y, p.x, p.y) < p.r) {
+          e.caltropSafe = this.clock + 3000;
+          this.stunEnemy(e, 1500, 'hazard');
+        }
+      }
+      return true;
+    });
+  }
+
+  // Yank every nearby coin to you.
+  useCoinMagnet(g, lvl) {
+    const r = ABILITY_STATS.coinmagnet.radius[lvl - 1];
+    const pc = g.body.center;
+    this.ring(pc.x, pc.y, r, 0xfbf236);
+    Sfx.play('magnet');
+    for (const coin of this.coins.getChildren()) {
+      if (!coin.ready || coin.collected || Phaser.Math.Distance.Between(pc.x, pc.y, coin.x, coin.y) > r) continue;
+      coin.ready = false;
+      this.tweens.killTweensOf(coin);
+      this.tweens.add({
+        targets: coin, x: pc.x, y: pc.y, duration: 250, ease: 'Quad.easeIn',
+        onComplete: () => { coin.ready = true; if (!g.down) this.collectCoin(g, coin); },
+      });
+    }
+    return ABILITY_STATS.coinmagnet.cooldown[lvl - 1];
+  }
+
+  useSmokePouch(g, lvl) {
+    g.buffs.smoke = this.clock + this.buffDuration(g, 'smoke');
+    PowerUps.smokePuff(this, g);
+    Sfx.play('powerup');
+    return ABILITY_STATS.smokepouch.cooldown[lvl - 1];
+  }
+
+  // Toss a shiny fake coin; most heroes (and thieves) chase it until it pops.
+  useDecoy(g, lvl) {
+    if (this.decoy) this.endDecoy();
+    const pc = g.body.center, dir = this.facing(g);
+    let x = pc.x, y = pc.y;
+    for (let d = 110; d >= 0; d -= 10) {
+      const t = worldToTile(pc.x + dir * d, pc.y);
+      if (this.isFree(t.c, t.r)) { x = pc.x + dir * d; break; }
+    }
+    const img = this.add.sprite(pc.x, pc.y, 'coin_0').play('coin_spin').setScale(1.8).setDepth(5);
+    this.tweens.add({ targets: img, x, duration: 300, ease: 'Quad.easeOut' });
+    this.tweens.add({ targets: img, y: y - 24, duration: 150, yoyo: true, ease: 'Quad.easeOut' });
+    const t = worldToTile(x, y);
+    this.decoy = {
+      x, y, img, isDecoy: true, down: false, buffs: {},
+      body: { center: { x, y } },
+      flow: this.bfs(t.c, t.r),
+      until: this.clock + ABILITY_STATS.decoy.duration[lvl - 1],
+      nextRing: this.clock + 300,
+    };
+    Sfx.play('decoy');
+    return ABILITY_STATS.decoy.cooldown[lvl - 1];
+  }
+
+  updateDecoy() {
+    const d = this.decoy;
+    if (!d) return;
+    if (this.clock >= d.until) { this.endDecoy(); return; }
+    if (this.clock >= d.nextRing) {
+      this.ring(d.x, d.y, 30, 0xfbf236);
+      d.nextRing = this.clock + 500;
+    }
+  }
+
+  endDecoy() {
+    const d = this.decoy;
+    this.decoy = null;
+    this.tweens.killTweensOf(d.img);
+    this.chips.explode(10, d.x, d.y);
+    this.tweens.add({ targets: d.img, scale: 0, alpha: 0, duration: 200, onComplete: () => d.img.destroy() });
+  }
+
   mainBpm() {
     return SONGS.main.bpm + Math.min(this.stats.wave - 1, 12) * 3;
   }
@@ -1189,7 +1457,7 @@ class GameScene extends Phaser.Scene {
     this.toastBusy = true;
     Sfx.play('achieve');
     const w = 320, h = 44;
-    const restX = W - 8 - w / 2, y = HUD_H + 42;
+    const restX = W - 8 - w / 2, y = HUD_H + 72; // below the ability readout on the top wall
     const box = this.add.container(W + w / 2, y).setDepth(1600);
     box.add([
       this.add.rectangle(0, 0, w, h, 0x0d0b14, 0.92).setStrokeStyle(2, 0xfbf236),
@@ -1226,7 +1494,7 @@ class GameScene extends Phaser.Scene {
       this.tweens.pauseAll();
       this.anims.pauseAll();
       Music.pause();
-      const help = 'P / Start to resume\n\nM mute all    N music on/off';
+      const help = 'P / Start to resume\n\nE / Y ability    R / Back reroll bounty\nM mute all    N music on/off';
       this.pauseUi = [
         this.add.rectangle(0, 0, W, H, 0x000000, 0.55).setOrigin(0).setDepth(2000),
         this.add.text(W / 2, H / 2 - 40, 'PAUSED', textStyle(36, '#ffffff')).setOrigin(0.5).setDepth(2001),
@@ -1250,6 +1518,8 @@ class GameScene extends Phaser.Scene {
     Progress.addRun(this.stats.banked);
     if (Progress.load().lifetimeGold >= 5000) this.achieve('lifetime_5000');
     this.stats.skins = this.goblins.map((g) => g.skin);
+    this.stats.wallet = Progress.load().wallet;
+    if (this.decoy) this.endDecoy();
     for (const g of this.goblins) {
       this.tweens.killTweensOf(g);
       g.anims.stop();
@@ -1289,6 +1559,8 @@ class GameScene extends Phaser.Scene {
     }
     if (this.paused || this.over) {
       this.rollRequests.clear();
+      this.abilityRequests.clear();
+      this.rerollRequested = false;
       return;
     }
     if (this.debug) this.handleDebugKeys();
@@ -1298,10 +1570,15 @@ class GameScene extends Phaser.Scene {
 
     for (const g of this.rollRequests) this.tryRoll(g);
     this.rollRequests.clear();
+    for (const g of this.abilityRequests) this.useAbility(g);
+    this.abilityRequests.clear();
+    if (this.rerollRequested) Bounties.reroll(this);
+    this.rerollRequested = false;
     for (const g of this.goblins) {
       this.moveGoblin(g);
       this.checkStash(g);
       this.updateRevive(g, delta);
+      this.magnetPaws(g);
       if (g.combo && this.clock >= g.comboUntil) g.combo = 0;
       if (!g.down && this.buffActive(g, 'boots') && this.clock >= g.nextTrail) {
         this.ghost(g, 0xfbf236, 0.45);
@@ -1311,6 +1588,8 @@ class GameScene extends Phaser.Scene {
     this.enemies.getChildren().slice().forEach((e) => this.updateEnemy(e));
     this.arrows.getChildren().slice().forEach((a) => { if (this.clock > a.dieAt) a.destroy(); });
     this.updateIce();
+    this.updateCaltrops();
+    this.updateDecoy();
     this.updateChest(delta);
     Hazards.update(this);
     PowerUps.update(this);

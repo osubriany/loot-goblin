@@ -23,15 +23,17 @@ class GameOverScene extends Phaser.Scene {
     const secs = Math.floor(stats.elapsed / 1000);
     const time = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     const lines = [
-      `Gold banked ...... ${stats.coinsBanked}`,
+      `Gold banked ...... ${stats.coinsBanked}  (shop gold now ${(stats.wallet || 0).toLocaleString()})`,
       `Biggest haul ..... ${stats.bestHaul}`,
       `Gold dropped ..... ${stats.goldLost}`,
+      `Heroes shivved ... ${stats.kills}`,
       `Bounties claimed . ${stats.bounties}  (best streak ${stats.bestStreak})`,
       `Survived ......... ${time}  (wave ${stats.wave})`,
     ];
-    this.add.text(W / 2, 350, lines.join('\n'), { ...textStyle(18, '#ffffff'), lineSpacing: 10 }).setOrigin(0.5);
+    this.add.text(W / 2, 360, lines.join('\n'), { ...textStyle(17, '#ffffff'), lineSpacing: 8 }).setOrigin(0.5);
+    if (stats.power) this.add.text(W / 2, 450, `Upgrade power ${stats.power}`, textStyle(13, '#9badb7')).setOrigin(0.5);
 
-    const prompt = this.add.text(W / 2, 480, 'SPACE / A  try again      M / B  menu', textStyle(22, '#ffffff')).setOrigin(0.5);
+    const prompt = this.add.text(W / 2, 490, 'SPACE try again     B shop     M menu', textStyle(22, '#ffffff')).setOrigin(0.5);
     this.tweens.add({ targets: prompt, alpha: 0.3, duration: 500, yoyo: true, repeat: -1 });
 
     const skins = stats.skins || ['gob_classic'];
@@ -51,13 +53,17 @@ class GameOverScene extends Phaser.Scene {
     };
     const retry = () => go('Game', { coop });
     const menu = () => go('Menu');
+    const shop = () => go('Shop');
     this.time.delayedCall(600, () => {
       this.input.keyboard.once('keydown-SPACE', retry);
       this.input.keyboard.once('keydown-M', menu);
+      this.input.keyboard.once('keydown-B', shop);
       this.input.once('pointerdown', retry);
+      // Gamepad: A / Start retry, X shop, B menu.
       if (this.input.gamepad) {
         const onPad = (_pad, { index }) => {
           if (index === 0 || index === PAD.pause) retry();
+          else if (index === PAD.shop) shop();
           else if (index === PAD.back) menu();
         };
         this.input.gamepad.on('down', onPad);

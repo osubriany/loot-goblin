@@ -33,10 +33,22 @@ const PLAYER_STARTS = [[4, 13], [4, 11]]; // P1, P2
 // Movement keys are Phaser key names; roll keys are KeyboardEvent.code values
 // (so left and right Shift can belong to different players).
 const CONTROLS = {
-  solo: { left: ['A', 'LEFT'], right: ['D', 'RIGHT'], up: ['W', 'UP'], down: ['S', 'DOWN'], roll: ['ShiftLeft', 'ShiftRight', 'Space'] },
-  p1: { left: ['A'], right: ['D'], up: ['W'], down: ['S'], roll: ['ShiftLeft', 'Space'] },
-  p2: { left: ['LEFT'], right: ['RIGHT'], up: ['UP'], down: ['DOWN'], roll: ['ShiftRight', 'Enter', 'NumpadEnter'] },
+  solo: {
+    left: ['A', 'LEFT'], right: ['D', 'RIGHT'], up: ['W', 'UP'], down: ['S', 'DOWN'],
+    roll: ['ShiftLeft', 'ShiftRight', 'Space'], ability: ['KeyE', 'KeyQ'], abilityKey: 'E',
+  },
+  p1: {
+    left: ['A'], right: ['D'], up: ['W'], down: ['S'],
+    roll: ['ShiftLeft', 'Space'], ability: ['KeyE'], abilityKey: 'E',
+  },
+  p2: {
+    left: ['LEFT'], right: ['RIGHT'], up: ['UP'], down: ['DOWN'],
+    roll: ['ShiftRight', 'Enter', 'NumpadEnter'], ability: ['Slash', 'ControlRight', 'Numpad0'], abilityKey: '/',
+  },
 };
+
+// "Stash Spikes" perk: a ring of spike tiles near the stash that only hurt heroes.
+const STASH_SPIKES = [[1, 13], [2, 13], [3, 13], [4, 13], [4, 14], [4, 15], [4, 16]];
 
 // Co-op: stand next to a downed partner this long to bring them back.
 const REVIVE = { time: 2000, hearts: 1, range: 34 };
@@ -45,7 +57,11 @@ const REVIVE = { time: 2000, hearts: 1, range: 34 };
 const STREAK = { step: 0.1, max: 5 };
 
 // Standard-mapping button indices. Gamepad 1 drives P1, gamepad 2 drives P2 (keyboard still works).
-const PAD = { deadzone: 0.3, roll: [0, 1, 2, 5], pause: 9, up: 12, down: 13, left: 14, right: 15, back: 1, trophies: 3 };
+// In game: Y uses the equipped ability, Back/Select rerolls the bounty. In menus: X opens the shop.
+const PAD = {
+  deadzone: 0.3, roll: [0, 1, 2, 5], ability: 3, reroll: 8, pause: 9,
+  up: 12, down: 13, left: 14, right: 15, back: 1, trophies: 3, shop: 2,
+};
 
 // minWave: first wave the kind can appear; intro: banner shown the first time it does.
 const ENEMY_TYPES = {

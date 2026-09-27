@@ -95,6 +95,13 @@ const Sfx = {
       case 'down': seq([440, 330, 220], 0.12, 0.2, 'sawtooth', 0.07); break;
       case 'revive': seq([392, 523, 659, 784, 1047], 0.07, 0.14, 'triangle', 0.1); break;
       case 'achieve': seq([784, 1047, 1319, 1568, 2093], 0.06, 0.18, 'triangle', 0.1); this.tone(2637, 0.3, 'sine', 0.04, 0.3); break;
+      case 'shiv': this.noise(0.08, 0.1); this.tone(1400, 0.08, 'sawtooth', 0.05, 0, 500); break;
+      case 'kill': this.tone(300, 0.25, 'square', 0.08, 0, 80); this.noise(0.2, 0.1, 0.05); break;
+      case 'caltrops': seq([1600, 1300, 1700, 1200], 0.03, 0.04, 'square', 0.03); break;
+      case 'magnet': this.tone(300, 0.35, 'sine', 0.08, 0, 1200); break;
+      case 'decoy': seq([988, 1319, 988, 1319], 0.08, 0.08, 'triangle', 0.05); break;
+      case 'buy': seq([523, 784, 1047], 0.06, 0.1, 'square', 0.07); break;
+      case 'nope': this.tone(180, 0.15, 'square', 0.06, 0, 120); break;
       case 'gameover': seq([392, 330, 262, 196], 0.22, 0.3, 'square', 0.08); break;
     }
   },

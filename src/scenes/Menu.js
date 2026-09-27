@@ -1,7 +1,7 @@
 const MODE_HELP = {
-  solo: 'WASD / Arrows move      SHIFT / SPACE dodge roll      (or a gamepad)',
-  coop: 'P1: WASD move, LEFT SHIFT / SPACE roll\n'
-    + 'P2: Arrows move, RIGHT SHIFT / ENTER roll\n'
+  solo: 'WASD / Arrows move    SHIFT / SPACE roll    E ability\nP pause   M mute   N music   (gamepads work too)',
+  coop: 'P1: WASD move, LEFT SHIFT / SPACE roll, E ability\n'
+    + 'P2: Arrows move, RIGHT SHIFT / ENTER roll, / ability\n'
     + 'Gamepads work too. Stand by a downed partner to revive them',
 };
 
@@ -32,7 +32,7 @@ class MenuScene extends Phaser.Scene {
       'Bank at your STASH: 10+ gold x1.5, 20+ gold x2',
       'Get caught: drop half your loot and lose a heart',
       'Finish BOUNTIES for hearts; chain them for a STREAK bonus',
-      'P pause    M mute    N music    T trophy room',
+      'Banked coins go to your GOLD: spend it in the SHOP between runs',
     ];
     this.add.text(W / 2, 190, lines.join('\n'), { ...textStyle(15, '#ffffff'), lineSpacing: 8, align: 'center' }).setOrigin(0.5);
 
@@ -54,9 +54,12 @@ class MenuScene extends Phaser.Scene {
     this.bestText = this.add.text(W / 2, 516, '', textStyle(18, '#ff9f43')).setOrigin(0.5);
     const prompt = this.add.text(W / 2, 548, 'PRESS SPACE OR ENTER TO START', textStyle(22, '#ffffff')).setOrigin(0.5);
     this.tweens.add({ targets: prompt, alpha: 0.2, duration: 500, yoyo: true, repeat: -1 });
-    const trophies = this.add.text(W / 2, 578, `T  TROPHY ROOM  (${Progress.count()}/${ACHIEVEMENTS.length})`, textStyle(14, '#fbf236'))
-      .setOrigin(0.5).setInteractive({ useHandCursor: true });
-    trophies.on('pointerdown', () => this.openTrophies());
+    const shop = this.add.text(W / 2 - 20, 578, `B  SHOP  (${Progress.load().wallet.toLocaleString()} gold)`, textStyle(14, '#fbf236'))
+      .setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
+    shop.on('pointerdown', () => this.openScene('Shop'));
+    const trophies = this.add.text(W / 2 + 20, 578, `T  TROPHY ROOM  (${Progress.count()}/${ACHIEVEMENTS.length})`, textStyle(14, '#fbf236'))
+      .setOrigin(0, 0.5).setInteractive({ useHandCursor: true });
+    trophies.on('pointerdown', () => this.openScene('Trophies'));
 
     // A goblin fleeing a knight across the bottom of the screen.
     const y = H - 34;
@@ -73,7 +76,8 @@ class MenuScene extends Phaser.Scene {
     kb.on('keydown-RIGHT', () => this.cycleSkin(this.coop ? 'p2' : 'p1', 1));
     kb.on('keydown-A', () => this.cycleSkin('p1', -1));
     kb.on('keydown-D', () => this.cycleSkin('p1', 1));
-    kb.on('keydown-T', () => this.openTrophies());
+    kb.on('keydown-T', () => this.openScene('Trophies'));
+    kb.on('keydown-B', () => this.openScene('Shop'));
     kb.on('keydown-N', () => Music.toggle());
 
     if (this.input.gamepad) {
@@ -83,7 +87,8 @@ class MenuScene extends Phaser.Scene {
         else if (index === PAD.down) this.select(true);
         else if (index === PAD.left) this.cycleSkin(player, -1);
         else if (index === PAD.right) this.cycleSkin(player, 1);
-        else if (index === PAD.trophies) this.openTrophies();
+        else if (index === PAD.trophies) this.openScene('Trophies');
+        else if (index === PAD.shop) this.openScene('Shop');
         else if (index === 0 || index === PAD.pause) this.start();
       };
       this.input.gamepad.on('down', onPad);
@@ -151,11 +156,11 @@ class MenuScene extends Phaser.Scene {
     this.refreshSkinRows();
   }
 
-  openTrophies() {
+  openScene(key) {
     if (this.started) return;
     this.started = true;
     Sfx.play('select');
-    this.scene.start('Trophies');
+    this.scene.start(key);
   }
 
   start() {

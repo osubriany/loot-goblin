@@ -15,5 +15,5 @@ window.game = new Phaser.Game({
   input: { gamepad: true },
   physics: { default: 'arcade', arcade: { debug: false } },
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  scene: [BootScene, MenuScene, TrophyScene, GameScene, GameOverScene],
+  scene: [BootScene, MenuScene, TrophyScene, ShopScene, GameScene, GameOverScene],
 });

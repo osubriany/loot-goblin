@@ -45,6 +45,9 @@ const Progress = {
       lifetimeGold: d.lifetimeGold || 0,
       runs: d.runs || 0,
       skins: d.skins || { p1: 'classic', p2: 'frost' },
+      wallet: d.wallet || 0,          // shop gold: every coin banked, kept between runs
+      upgrades: d.upgrades || {},     // upgrade id -> level bought
+      equipped: d.equipped || null,   // the one active ability taken into runs
     };
     return this.data;
   },
@@ -93,5 +96,46 @@ const Progress = {
     d.runs++;
     d.lifetimeGold += banked;
     this.save();
+  },
+
+  // ---- shop (see UPGRADES in upgrades.js)
+
+  addGold(n) {
+    this.load().wallet += n;
+    this.save();
+  },
+
+  level(id) {
+    return this.load().upgrades[id] || 0;
+  },
+
+  // Price of the next level, or null when maxed.
+  nextCost(id) {
+    const costs = UPGRADES[id].costs;
+    const l = this.level(id);
+    return l < costs.length ? costs[l] : null;
+  },
+
+  buy(id) {
+    const cost = this.nextCost(id);
+    if (cost === null || this.load().wallet < cost) return false;
+    this.data.wallet -= cost;
+    this.data.upgrades[id] = this.level(id) + 1;
+    // The first ability bought gets equipped automatically.
+    if (UPGRADES[id].kind === 'ability' && !this.data.equipped) this.data.equipped = id;
+    this.save();
+    return true;
+  },
+
+  equip(id) {
+    if (UPGRADES[id].kind !== 'ability' || !this.level(id)) return false;
+    this.load().equipped = id;
+    this.save();
+    return true;
+  },
+
+  // Total upgrade levels owned; drives hero scaling.
+  power() {
+    return Object.values(this.load().upgrades).reduce((sum, l) => sum + l, 0);
   },
 };

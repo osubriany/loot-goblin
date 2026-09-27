@@ -36,6 +36,21 @@ const Bounties = {
     if (scene.bountyText) scene.tweens.add({ targets: [scene.bountyLabel, scene.bountyText], scale: 1.25, duration: 150, yoyo: true, repeat: 1 });
   },
 
+  // "Bounty Reroll" perk: swap the current bounty once per wave, keeping the same deadline.
+  canReroll(scene) {
+    const b = scene.bounty;
+    return scene.upg.reroll > 0 && b && !b.done && !b.failed && scene.rerolledWave !== scene.stats.wave;
+  },
+
+  reroll(scene) {
+    if (!this.canReroll(scene)) return;
+    const endsAt = scene.bounty.endsAt;
+    scene.rerolledWave = scene.stats.wave;
+    this.start(scene);
+    scene.bounty.endsAt = endsAt;
+    scene.floatText(W / 2, HUD_H + 70, 'BOUNTY REROLLED', '#ff9f43', 18, 1200);
+  },
+
   event(scene, type, amount = 1) {
     const b = scene.bounty;
     if (!b || b.done || b.failed) return;
@@ -88,7 +103,7 @@ const Bounties = {
     let reward;
     if (hurt) {
       hurt.hearts++;
-      scene.tweens.add({ targets: hurt.hud.hearts[hurt.hearts - 1], scale: 1.8, duration: 150, yoyo: true });
+      scene.popHeart(hurt, hurt.hearts - 1);
       reward = scene.coop ? `+1 HEART for ${hurt.label}` : '+1 HEART';
     } else {
       const pts = 15 * scene.stats.wave;

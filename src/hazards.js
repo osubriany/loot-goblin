@@ -2,16 +2,24 @@
 // Spikes and barrels hurt the goblin and stun heroes, so heroes can be lured into them.
 // All timing uses scene.clock, so everything freezes while paused.
 
+const FRIENDLY_TINT = 0x9be08a;
+
 const Hazards = {
   init(scene) {
-    scene.spikeGroups = SPIKE_GROUPS.map((tiles, i) => ({
-      delay: 1500 + i * 1125, // staggered so the groups don't fire together
+    const makeGroup = (tiles, delay, friendly = false) => ({
+      delay,
+      friendly, // friendly spikes (Stash Spikes perk) only hurt heroes and glow green
       state: 'off',
       tiles: tiles.map(([c, r]) => {
         const { x, y } = tileCenter(c, r);
-        return { c, r, x, y, img: scene.add.image(x, y, 'spikes_off').setDepth(1) };
+        const img = scene.add.image(x, y, 'spikes_off').setDepth(1);
+        if (friendly) img.setTint(FRIENDLY_TINT);
+        return { c, r, x, y, img };
       }),
-    }));
+    });
+    // Staggered so the groups don't fire together.
+    scene.spikeGroups = SPIKE_GROUPS.map((tiles, i) => makeGroup(tiles, 1500 + i * 1125));
+    if (scene.upg.stashspikes) scene.spikeGroups.push(makeGroup(STASH_SPIKES, 800, true));
 
     scene.traps = [];
     scene.barrels = scene.physics.add.group();
@@ -59,15 +67,16 @@ const Hazards = {
     const alive = scene.goblins.filter((g) => !g.down);
     for (const grp of scene.spikeGroups) {
       const state = this.spikeState(scene, grp);
+      const baseTint = (img) => (grp.friendly ? img.setTint(FRIENDLY_TINT) : img.clearTint());
       if (state !== grp.state) {
         grp.state = state;
-        grp.tiles.forEach((t) => t.img.setTexture(state === 'on' ? 'spikes_on' : 'spikes_off').clearTint());
+        grp.tiles.forEach((t) => baseTint(t.img.setTexture(state === 'on' ? 'spikes_on' : 'spikes_off')));
         const near = alive.some((g) => Phaser.Math.Distance.Between(g.x, g.y, grp.tiles[0].x, grp.tiles[0].y) < 220);
         if (state === 'on' && near) Sfx.play('spikes');
       }
       if (state === 'warn') {
-        const red = Math.floor(scene.clock / 100) % 2 === 0;
-        grp.tiles.forEach((t) => (red ? t.img.setTint(0xff7070) : t.img.clearTint()));
+        const flash = Math.floor(scene.clock / 100) % 2 === 0;
+        grp.tiles.forEach((t) => (flash ? t.img.setTint(grp.friendly ? 0x6abe30 : 0xff7070) : baseTint(t.img)));
       }
       if (state !== 'on') continue;
 
@@ -75,9 +84,11 @@ const Hazards = {
         const tt = worldToTile(x, y);
         return grp.tiles.find((t) => t.c === tt.c && t.r === tt.r);
       };
-      for (const g of alive) {
-        const hit = tileAt(g.body.center.x, g.body.center.y);
-        if (hit) scene.hurtPlayer(g, hit);
+      if (!grp.friendly) {
+        for (const g of alive) {
+          const hit = tileAt(g.body.center.x, g.body.center.y);
+          if (hit) scene.hurtPlayer(g, hit);
+        }
       }
       for (const e of scene.enemies.getChildren()) {
         if (tileAt(e.body.center.x, e.body.center.y)) scene.stunEnemy(e, 1500, 'hazard');

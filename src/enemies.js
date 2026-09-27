@@ -1,7 +1,8 @@
 // Per-kind adventurer behavior. Each function runs once per frame as (scene, enemy, now).
 // Windup states set `e.windTint`; GameScene.updateEnemy applies tints after the AI runs.
-// scene.targetFor(e) is the nearest goblin the hero can see (null if all are down or smoke-hidden);
-// scene.chase(e) already falls back to wandering when there is none.
+// scene.targetFor(e) is the nearest goblin the hero can see (null if all are down or smoke-hidden),
+// or an active decoy coin; scene.chase(e) already falls back to wandering when there is none.
+// scene.cd(ms) shortens attack cooldowns as hero threat rises.
 
 const dist = (a, b) => Phaser.Math.Distance.Between(a.x, a.y, b.x, b.y);
 const angleTo = (a, b) => Phaser.Math.Angle.Between(a.x, a.y, b.x, b.y);
@@ -46,7 +47,7 @@ const ENEMY_AI = {
         e.windTint = null;
         scene.fireArrow(e, e.aimTarget);
         e.mode = 'move';
-        e.nextShot = now + 1700;
+        e.nextShot = now + scene.cd(1700);
       }
       return;
     }
@@ -79,7 +80,7 @@ const ENEMY_AI = {
       return;
     }
     if (e.mode === 'dash') {
-      if (now >= e.dashEnd) { e.mode = 'move'; e.nextDash = now + 2300; }
+      if (now >= e.dashEnd) { e.mode = 'move'; e.nextDash = now + scene.cd(2300); }
       return;
     }
     const tgt = scene.targetFor(e);
@@ -102,7 +103,7 @@ const ENEMY_AI = {
       if (now >= e.castAt) {
         e.windTint = null;
         e.mode = 'move';
-        e.nextCast = now + 3800;
+        e.nextCast = now + scene.cd(3800);
         scene.createIce(e.castTarget.x, e.castTarget.y);
       }
       return;
@@ -139,7 +140,7 @@ const ENEMY_AI = {
     }
 
     if (now >= e.nextBless) {
-      e.nextBless = now + 4000;
+      e.nextBless = now + scene.cd(4000);
       let blessed = 0;
       for (const o of scene.enemies.getChildren()) {
         if (o === e || o.gone || dist(ec, o.body.center) > 120) continue;
@@ -156,6 +157,9 @@ const ENEMY_AI = {
   thief(scene, e, now) {
     if (e.mode === 'leave') return scene.leave(e);
     const ec = e.body.center;
+
+    // A decoy coin is irresistible.
+    if (scene.decoy) return scene.moveToward(e, scene.nextStep(e, scene.decoy.flow, scene.decoy), scene.speedOf(e));
 
     const chest = scene.chest;
     if (chest) {
@@ -198,7 +202,7 @@ const ENEMY_AI = {
       if (dist(ec, coin) < 20) {
         e.setVelocity(0, 0);
         if (ready) {
-          if (Hazards.placeTrap(scene, e, coin.x, coin.y)) e.nextTrap = now + TRAP.every;
+          if (Hazards.placeTrap(scene, e, coin.x, coin.y)) e.nextTrap = now + scene.cd(TRAP.every);
           coin.trapped = true; // placed, or the spot was invalid: skip this coin either way
           e.coinTarget = null;
         }
@@ -207,7 +211,7 @@ const ENEMY_AI = {
       }
     } else {
       scene.wander(e, scene.speedOf(e) * 0.7);
-      if (ready && Hazards.placeTrap(scene, e, ec.x, ec.y)) e.nextTrap = now + TRAP.every;
+      if (ready && Hazards.placeTrap(scene, e, ec.x, ec.y)) e.nextTrap = now + scene.cd(TRAP.every);
     }
   },
 
@@ -228,7 +232,7 @@ const ENEMY_AI = {
     if (e.mode === 'charge') {
       if (now >= e.chargeEnd) {
         e.mode = 'move';
-        e.nextCharge = now + 3000;
+        e.nextCharge = now + scene.cd(3000);
       } else {
         e.setVelocity(Math.cos(e.chargeAngle) * 420, Math.sin(e.chargeAngle) * 420);
       }

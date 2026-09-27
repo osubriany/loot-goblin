@@ -16,8 +16,8 @@
     // Load the game scripts in order. The ?v= cache-buster makes a normal refresh always pick up
     // edited files (simple static servers send no cache headers, so browsers keep stale copies).
     const GAME_SCRIPTS = [
-      'config', 'progress', 'sprites', 'sfx', 'music', 'enemies', 'powerups', 'hazards', 'bounties',
-      'scenes/Boot', 'scenes/Menu', 'scenes/Trophies', 'scenes/Game', 'scenes/GameOver', 'main',
+      'config', 'progress', 'upgrades', 'sprites', 'sfx', 'music', 'enemies', 'powerups', 'hazards', 'bounties',
+      'scenes/Boot', 'scenes/Menu', 'scenes/Trophies', 'scenes/Shop', 'scenes/Game', 'scenes/GameOver', 'main',
     ];
     const version = Date.now();
     (function load(i) {

@@ -12,7 +12,8 @@ const PowerUps = {
 
   trySpawn(scene, forceKind = null) {
     if (scene.over) return;
-    if (!forceKind && (scene.stats.wave < 2 || scene.powerups.countActive(true) > 0 || Math.random() > 0.35)) return;
+    const chance = 0.35 + 0.1 * scene.upg.luck; // Lucky Charm
+    if (!forceKind && (scene.stats.wave < 2 || scene.powerups.countActive(true) > 0 || Math.random() > chance)) return;
 
     let kind = forceKind;
     if (!kind) {
@@ -59,7 +60,7 @@ const PowerUps = {
       const patient = [g, ...scene.goblins.filter((o) => o !== g && !o.down)].find((o) => o.hearts < o.maxHearts);
       if (patient) {
         patient.hearts++;
-        scene.tweens.add({ targets: patient.hud.hearts[patient.hearts - 1], scale: 1.8, duration: 150, yoyo: true });
+        scene.popHeart(patient, patient.hearts - 1);
       } else {
         scene.stats.banked += 10;
       }

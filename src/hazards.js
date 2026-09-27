@@ -61,7 +61,7 @@ const Hazards = {
         tiles: tiles.map(([c, r]) => {
           const { x, y } = tileCenter(c, r);
           const img = scene.add.image(x, y, tex.off).setDepth(1).setTint(tint);
-          return { c, r, x, y, img };
+          return { c, r, x, y, img, cause: look === 'lava' ? 'lava' : 'spikes' }; // cause: for "caught by"
         }),
       };
     };
@@ -164,6 +164,7 @@ const Hazards = {
       b.body.setCircle(11, 5, 5);
       b.hits = new Set();
       b.dir = lane.dir;
+      b.cause = 'barrel';
       b.body.setVelocity(lane.dir[0] * BARREL.speed, lane.dir[1] * BARREL.speed);
     });
   },

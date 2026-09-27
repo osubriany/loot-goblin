@@ -401,6 +401,24 @@ const DOOR = [
   'mBBBBBBBBBBBBBBm',
 ];
 
+// Gold piled up on the stash; it grows as the run's score climbs (see STASH_TIERS in Game.js).
+const GOLD_PILE = [
+  '......kkkk......',
+  '....kkyyyykk....',
+  '...kyywyyyYyk...',
+  '..kyyyyyyYyyyk..',
+  '.kyyYyyywyyyyyk.',
+  'kyyyyyyyyyyYyyyk',
+  'kyYyyyyYyyyyyyYk',
+  'kyyyyyyyyyyyyyyk',
+  'kYyyyYyyyyyyYyyk',
+  '.kYYYYYYYYYYYYk.',
+];
+const GOLD_PILE_GEMS = GOLD_PILE.map((row, r) => {
+  const gems = { 3: [5, 'D'], 5: [9, 'R'], 7: [3, 'D'], 6: [12, 'i'] }[r];
+  return gems ? row.slice(0, gems[0]) + gems[1] + row.slice(gems[0] + 1) : row;
+});
+
 // Library bookshelf: wooden frame with two rows of colorful book spines.
 const SHELF = (() => {
   const plank = 'BBBBBBBBBBBBBBBB';
@@ -474,6 +492,7 @@ const SPRITES = {
   chest: [CHEST_SPRITE, 2], barrel: [BARREL_SPRITE, 2],
   beartrap_open: [BEARTRAP_OPEN, 2], beartrap_shut: [BEARTRAP_SHUT, 2],
   shelf: [SHELF, 2],
+  gold_pile: [GOLD_PILE, 3], gold_pile_gems: [GOLD_PILE_GEMS, 3],
   chip: [['bB', 'Bb'], 2],
   potion: [POTION, 2], boots: [BOOTS, 2], smoke: [SMOKE, 2],
   coin_0: [COIN_A, 2], coin_1: [COIN_B, 2],

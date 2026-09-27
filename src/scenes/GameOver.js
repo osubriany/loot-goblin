@@ -9,13 +9,22 @@ class GameOverScene extends Phaser.Scene {
 
     this.add.tileSprite(0, 0, W, H, 'floor').setOrigin(0).setAlpha(0.35);
 
-    this.add.text(W / 2, 72, 'CAUGHT!', textStyle(60, '#d95763')).setOrigin(0.5);
-    if (coop) this.add.text(W / 2, 114, 'CO-OP', textStyle(16, '#9fdcf2')).setOrigin(0.5);
+    this.add.text(W / 2, 68, 'CAUGHT!', textStyle(60, '#d95763')).setOrigin(0.5);
+    // What landed the final blow, so each death teaches something.
+    const caught = `${stats.caughtBy || 'Caught'} on wave ${stats.wave}${coop ? '  (co-op)' : ''}`;
+    this.add.text(W / 2, 110, caught, textStyle(15, '#cbdbfc')).setOrigin(0.5);
     this.add.text(W / 2, 148, `SCORE  ${stats.banked}`, textStyle(34, '#fbf236')).setOrigin(0.5);
 
+    // Near-misses are the strongest "one more try" hook, so call them out.
+    const gap = best - stats.banked;
+    const nearMiss = !isBest && best > 0 && gap <= Math.max(25, best * 0.15);
     if (isBest) {
-      const nb = this.add.text(W / 2, 190, 'NEW BEST!', textStyle(24, '#ff9f43')).setOrigin(0.5);
-      this.tweens.add({ targets: nb, scale: 1.15, duration: 400, yoyo: true, repeat: -1 });
+      const beat = best > 0 ? `  (+${stats.banked - best} over your old best)` : '';
+      const nb = this.add.text(W / 2, 190, `NEW BEST!${beat}`, textStyle(22, '#ff9f43')).setOrigin(0.5);
+      this.tweens.add({ targets: nb, scale: 1.1, duration: 400, yoyo: true, repeat: -1 });
+    } else if (nearMiss) {
+      const nm = this.add.text(W / 2, 190, gap === 0 ? `TIED your best of ${best}!` : `SO CLOSE! Only ${gap} from your best (${best})`, textStyle(20, '#ff9f43')).setOrigin(0.5);
+      this.tweens.add({ targets: nm, alpha: 0.5, duration: 450, yoyo: true, repeat: -1 });
     } else {
       this.add.text(W / 2, 190, `BEST  ${best}`, textStyle(20, '#9badb7')).setOrigin(0.5);
     }
@@ -28,7 +37,7 @@ class GameOverScene extends Phaser.Scene {
       `Gold dropped ..... ${stats.goldLost}`,
       `Heroes shivved ... ${stats.kills}`,
       `Bounties claimed . ${stats.bounties}  (best streak ${stats.bestStreak})`,
-      `Survived ......... ${time}  (wave ${stats.wave})`,
+      `Survived ......... ${time}`,
     ];
     this.add.text(W / 2, 285, lines.join('\n'), { ...textStyle(16, '#ffffff'), lineSpacing: 6 }).setOrigin(0.5);
     if (stats.power) this.add.text(W / 2, 371, `Upgrade power ${stats.power}`, textStyle(12, '#9badb7')).setOrigin(0.5);

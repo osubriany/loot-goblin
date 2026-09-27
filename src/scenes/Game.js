@@ -1,4 +1,13 @@
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+// The stash's gold pile grows as the run's score passes these marks.
+const STASH_TIERS = [
+  { min: 0 },
+  { min: 50, name: 'PILE', scale: 0.55 },
+  { min: 150, name: 'MOUND', scale: 0.8 },
+  { min: 400, name: 'HEAP', scale: 1.05, glitter: true },
+  { min: 1000, name: 'DRAGON HOARD', scale: 1.3, glitter: true, gems: true },
+];
 const INF = 9999;
 const DEBUG_SPAWNS = {
   ONE: 'knight', TWO: 'archer', THREE: 'rogue', FOUR: 'thief', FIVE: 'mage', SIX: 'cleric', SEVEN: 'paladin',
@@ -188,7 +197,34 @@ class GameScene extends Phaser.Scene {
   createStash() {
     const s = tileCenter(...STASH_TILE);
     this.stash = this.add.image(s.x, s.y, 'stash').setDepth(2);
-    this.add.text(s.x, s.y - 34, 'STASH', textStyle(12, '#fbf236')).setOrigin(0.5).setDepth(3);
+    // The gold pile sits in the stash and grows through STASH_TIERS as the run's score climbs.
+    this.stashPile = this.add.image(s.x, s.y + 10, 'gold_pile').setOrigin(0.5, 1).setDepth(2.5).setVisible(false);
+    this.stashLabel = this.add.text(s.x, s.y - 34, 'STASH', textStyle(12, '#fbf236')).setOrigin(0.5).setDepth(3);
+    this.stashTier = 0;
+    this.nextPileSparkle = 0;
+  }
+
+  // Grow the stash pile when the score crosses a tier; the top tiers glitter.
+  updateStashPile() {
+    const banked = this.stats.banked;
+    let tier = 0;
+    STASH_TIERS.forEach((t, i) => { if (banked >= t.min) tier = i; });
+    if (tier !== this.stashTier) {
+      this.stashTier = tier;
+      const t = STASH_TIERS[tier];
+      this.stashPile.setVisible(true).setTexture(t.gems ? 'gold_pile_gems' : 'gold_pile').setScale(t.scale * 0.6);
+      this.tweens.add({ targets: this.stashPile, scale: t.scale, duration: 350, ease: 'Back.easeOut' });
+      // Keep the STASH label just above the pile.
+      const top = this.stashPile.y - this.stashPile.height * t.scale;
+      this.tweens.add({ targets: this.stashLabel, y: Math.min(this.stash.y - 34, top - 8), duration: 350 });
+      this.floatText(this.stash.x + 70, this.stash.y - 60, `STASH: ${t.name}!`, '#fbf236', 16, 1400);
+      this.sparks.explode(20, this.stash.x, this.stash.y - 10);
+    }
+    if (STASH_TIERS[tier].glitter && this.clock >= this.nextPileSparkle) {
+      this.nextPileSparkle = this.clock + 450;
+      const w = this.stashPile.displayWidth, h = this.stashPile.displayHeight;
+      this.sparks.explode(1, this.stashPile.x + Phaser.Math.Between(-w / 3, w / 3), this.stashPile.y - Phaser.Math.Between(4, h));
+    }
   }
 
   // Fade out, swap in the next arena, put everyone somewhere legal, fade back in, then continue.
@@ -572,11 +608,23 @@ class GameScene extends Phaser.Scene {
         this.secondWind(g);
         return true;
       }
+      // Remember what landed the final blow for the game-over screen.
+      this.stats.caughtBy = `${this.coop ? `${g.label} caught by` : 'Caught by'} ${this.describeCause(src)}`;
       this.knockOut(g);
       return true;
     }
     this.blink(g, 7);
     return true;
+  }
+
+  // "a Rogue's dash", "an Archer's arrow", "the lava"... for the game-over recap.
+  describeCause(src) {
+    const causes = { arrow: "an Archer's arrow", barrel: 'a rolling barrel', spikes: 'spikes', lava: 'the lava' };
+    if (src.cause) return causes[src.cause];
+    const name = src.kind ? src.kind[0].toUpperCase() + src.kind.slice(1) : 'a hero';
+    if (src.kind === 'paladin') return src.mode === 'charge' ? "the Paladin's charge" : 'the Paladin';
+    if (src.kind === 'rogue' && src.mode === 'dash') return "a Rogue's dash";
+    return `${/^[AEIOU]/.test(name) ? 'an' : 'a'} ${name}`;
   }
 
   // "Second Wind" perk: get back up with 1 heart instead of going down.
@@ -1016,6 +1064,7 @@ class GameScene extends Phaser.Scene {
     arrow.body.setSize(6, 6);
     arrow.body.setVelocity(Math.cos(a) * 270, Math.sin(a) * 270);
     arrow.dieAt = this.clock + 3000;
+    arrow.cause = 'arrow';
     Sfx.play('shoot');
   }
 
@@ -1442,6 +1491,7 @@ class GameScene extends Phaser.Scene {
     this.displayBanked = gap < 1 ? s.banked : this.displayBanked + Math.max(1, gap * 0.12);
     this.bankedText.setText(`BANKED ${Math.floor(this.displayBanked)}`);
     if (!this.pbShown && this.bestAtStart > 0 && s.banked > this.bestAtStart) this.celebratePersonalBest();
+    this.updateStashPile();
     if (s.banked >= 500) this.achieve('score_500');
     if (s.banked >= 2000) this.achieve('score_2000');
     this.waveText.setText(`WAVE ${s.wave}`);

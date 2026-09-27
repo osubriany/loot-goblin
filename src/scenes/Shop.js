@@ -148,12 +148,23 @@ class ShopScene extends Phaser.Scene {
         row.tag.setText('');
       }
 
-      let desc;
-      if (!lvl) desc = `next: ${u.desc(1)}`;
-      else if (lvl >= max) desc = u.desc(lvl);
-      else desc = `${u.desc(lvl)}  >  ${u.desc(lvl + 1)}`;
-      row.desc.setText(desc);
+      // Longest form first; fall back to shorter ones so the text stays inside the tile.
+      let options;
+      if (!lvl) options = [`next: ${u.desc(1)}`];
+      else if (lvl >= max) options = [u.desc(lvl)];
+      else options = [`${u.desc(lvl)}  >  ${u.desc(lvl + 1)}`, `next: ${u.desc(lvl + 1)}`];
+      this.fitText(row.desc, options, row.bg.width - 20);
     }
+  }
+
+  // Use the first option that fits maxWidth; if none do, squeeze the last one horizontally.
+  fitText(text, options, maxWidth) {
+    text.setScale(1);
+    for (const opt of options) {
+      text.setText(opt);
+      if (text.width <= maxWidth) return;
+    }
+    text.setScale(maxWidth / text.width, 1);
   }
 
   leave(scene) {

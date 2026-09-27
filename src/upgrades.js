@@ -26,7 +26,7 @@ const UPGRADES = {
 
   shiv: {
     kind: 'ability', name: 'Shiv', costs: [300, 500, 900],
-    desc: (l) => `kill a hero (not bosses), ${secs(ABILITY_STATS.shiv.cooldown[l - 1])} cd${l >= 3 ? ', stuns bosses' : ''}`,
+    desc: (l) => `kill non-boss hero, ${secs(ABILITY_STATS.shiv.cooldown[l - 1])} cd${l >= 3 ? ', stun bosses' : ''}`,
   },
   caltrops: {
     kind: 'ability', name: 'Caltrops', costs: [200, 350, 600],
